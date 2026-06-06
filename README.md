@@ -10,6 +10,8 @@ Minedit is a work in progress. Expect things to break.
 
 This mod sends prompts to OpenRouter using the API key you configure. Depending on your OpenRouter account, model, and usage, requests may cost money. You are responsible for all usage and charges caused by your API key. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, or other side effects.
 
+Your OpenRouter API key is stored in plaintext in your Minecraft game directory at `config/minedit.properties`. It is not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it.
+
 Back up worlds before testing large builds or edits.
 
 ## Requirements
@@ -113,7 +115,7 @@ Default quick edit effort:
 low
 ```
 
-Settings are saved in `config/minedit.properties`. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
+Settings are saved in `config/minedit.properties`. The OpenRouter API key in that file is plaintext and belongs to the whole Minecraft game directory/profile, not a single world. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
 
 ## Reset Commands
 
