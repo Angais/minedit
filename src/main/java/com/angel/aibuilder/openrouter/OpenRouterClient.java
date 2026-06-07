@@ -15,6 +15,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -219,68 +221,43 @@ public final class OpenRouterClient {
     }
 
     private static Optional<String> costDisplay(JsonObject object) {
-        Optional<String> totalCost = nonZeroNumberString(object, "total_cost");
-        if (totalCost.isPresent()) {
-            return totalCost;
-        }
-        Optional<String> byokUsage = nonZeroNumberString(object, "byok_usage_inference");
+        Optional<BigDecimal> byokUsage = numberValue(object, "byok_usage_inference");
         if (byokUsage.isPresent()) {
-            return Optional.of(byokUsage.get() + " BYOK");
-        }
-        Optional<String> usage = nonZeroNumberString(object, "usage");
-        if (usage.isPresent()) {
-            return Optional.of(usage.get() + " OpenRouter");
-        }
-        Optional<String> upstreamUsage = nonZeroNumberString(object, "usage_upstream");
-        if (upstreamUsage.isPresent()) {
-            return Optional.of(upstreamUsage.get() + " upstream");
-        }
-
-        Optional<String> fallback = numberString(object, "total_cost");
-        if (fallback.isPresent()) {
-            return fallback;
-        }
-        fallback = numberString(object, "byok_usage_inference");
-        if (fallback.isPresent()) {
-            return Optional.of(fallback.get() + " BYOK");
+            return Optional.of(formatDollars(byokUsage.get()) + " BYOK");
         }
         if (bool(object, "is_byok")) {
             return Optional.empty();
         }
-        fallback = numberString(object, "usage");
-        if (fallback.isPresent()) {
-            return Optional.of(fallback.get() + " OpenRouter");
+
+        Optional<BigDecimal> totalCost = numberValue(object, "total_cost");
+        if (totalCost.isPresent()) {
+            return Optional.of(formatDollars(totalCost.get()));
         }
-        fallback = numberString(object, "usage_upstream");
-        if (fallback.isPresent()) {
-            return Optional.of(fallback.get() + " upstream");
+        Optional<BigDecimal> usage = numberValue(object, "usage");
+        if (usage.isPresent()) {
+            return Optional.of(formatDollars(usage.get()) + " OpenRouter");
+        }
+        Optional<BigDecimal> upstreamUsage = numberValue(object, "usage_upstream");
+        if (upstreamUsage.isPresent()) {
+            return Optional.of(formatDollars(upstreamUsage.get()) + " upstream");
         }
         return Optional.empty();
     }
 
-    private static Optional<String> numberString(JsonObject object, String key) {
+    private static Optional<BigDecimal> numberValue(JsonObject object, String key) {
         JsonElement value = object.get(key);
         if (value == null || value.isJsonNull() || !value.isJsonPrimitive()) {
             return Optional.empty();
         }
         try {
-            value.getAsBigDecimal();
-            return Optional.of(value.getAsString());
+            return Optional.of(value.getAsBigDecimal());
         } catch (NumberFormatException | UnsupportedOperationException e) {
             return Optional.empty();
         }
     }
 
-    private static Optional<String> nonZeroNumberString(JsonObject object, String key) {
-        Optional<String> value = numberString(object, key);
-        if (value.isEmpty()) {
-            return Optional.empty();
-        }
-        try {
-            return value.get().matches("0+(\\.0+)?") ? Optional.empty() : value;
-        } catch (RuntimeException e) {
-            return value;
-        }
+    private static String formatDollars(BigDecimal value) {
+        return "$" + value.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
     private static String string(JsonObject object, String key, String fallback) {
