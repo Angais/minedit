@@ -57,6 +57,42 @@ Back up worlds before testing large builds or edits.
 
 Minedit uses the selected X/Z area as the footprint. Height is not capped by the selection.
 
+## Examples
+
+Model output depends on the model, effort setting, selected footprint, and surrounding world state. These examples show one generated build and three follow-up edits.
+
+Build generation:
+
+```mcfunction
+/build a cute house
+```
+
+![Generated cute house](docs/examples/01-build-cute-house.png)
+
+Edit or quick edit:
+
+```mcfunction
+/edit quick make the walls red please
+```
+
+![Quick edit changing the walls red](docs/examples/02-quick-edit-red-walls.png)
+
+Edit or quick edit:
+
+```mcfunction
+/edit quick can you please change the wood for stone? a cool one
+```
+
+![Quick edit changing wood details to stone](docs/examples/03-quick-edit-stone-wood.png)
+
+Edit or quick edit:
+
+```mcfunction
+/edit quick don't really like those plants outside, can you remove them?
+```
+
+![Quick edit removing outside plants](docs/examples/04-quick-edit-remove-plants.png)
+
 ## Editing
 
 Use `/edit` to modify the selected area based on its current blocks:
