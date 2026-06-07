@@ -1,5 +1,6 @@
 package com.angel.aibuilder.codex;
 
+import com.angel.aibuilder.ai.AiCompletion;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -22,7 +23,7 @@ public final class CodexLocalClient {
     private static final Gson GSON = new Gson();
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
 
-    public String complete(String baseUrl, String model, String effort, String prompt) throws IOException, InterruptedException {
+    public AiCompletion complete(String baseUrl, String model, String effort, String prompt) throws IOException, InterruptedException {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("effort", effort);
@@ -33,7 +34,7 @@ public final class CodexLocalClient {
         if (text == null || !text.isJsonPrimitive()) {
             throw new IOException("Codex bridge response did not include text.");
         }
-        return text.getAsString();
+        return new AiCompletion(text.getAsString(), "");
     }
 
     public Status status(String baseUrl, String currentModel) throws IOException, InterruptedException {

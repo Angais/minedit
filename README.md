@@ -186,6 +186,10 @@ Provider commands:
 /status
 ```
 
+`/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, key/bridge configuration, current selection, active AI generations, and queued block placement jobs.
+
+After OpenRouter builds/edits, Minedit prints a usage line when OpenRouter returns generation metadata: input tokens, reasoning tokens, output tokens, cost/usage, finish reason, and generation id. Minedit only displays those usage fields and does not print account IDs or API key details.
+
 Set normal reasoning effort:
 
 ```mcfunction

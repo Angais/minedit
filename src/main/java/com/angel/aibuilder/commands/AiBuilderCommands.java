@@ -266,7 +266,8 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Quick edit effort: " + quickEffort).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("Codex bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
-        source.sendSuccess(() -> Component.literal("Queued builds/edits: " + BuildQueue.size()).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("AI generations in progress: " + BuildJobService.activeGenerationCount()).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Queued block placement jobs: " + BuildQueue.size()).withStyle(ChatFormatting.GRAY), false);
 
         if (source.getEntity() instanceof ServerPlayer player) {
             SelectionManager.selection(player.getUUID()).ifPresentOrElse(selection -> {
@@ -278,7 +279,8 @@ public class AiBuilderCommands {
                 source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GREEN), false);
             }, () -> source.sendSuccess(() -> Component.literal("Selection: none").withStyle(ChatFormatting.YELLOW), false));
 
-            source.sendSuccess(() -> Component.literal("Your queued build/edit: " + (BuildQueue.hasBuildFor(player.getUUID()) ? "yes" : "no")).withStyle(ChatFormatting.GRAY), false);
+            source.sendSuccess(() -> Component.literal("Your AI generation: " + (BuildJobService.hasActiveGenerationFor(player.getUUID()) ? "yes" : "no")).withStyle(ChatFormatting.GRAY), false);
+            source.sendSuccess(() -> Component.literal("Your queued block placement: " + (BuildQueue.hasBuildFor(player.getUUID()) ? "yes" : "no")).withStyle(ChatFormatting.GRAY), false);
         }
     }
 
