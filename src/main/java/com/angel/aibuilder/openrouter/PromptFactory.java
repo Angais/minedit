@@ -14,6 +14,10 @@ public final class PromptFactory {
                 - Do not place plants or flowers on stone, wood, glass, slabs, stairs, or air. Use grass_block, dirt, coarse_dirt, podzol, rooted_dirt, moss_block, farmland, sand, or other valid support as appropriate.
                 - Hanging blocks like lanterns/chains should have a solid block, chain, or suitable support above when hanging=true; standing variants need support below.
                 - If uncertain about a fragile decorative block's support rules, use a safer full-block decoration instead.
+                - Fluid safety: if using water or lava, build a closed basin, channel, pipe, or retaining rim before placing fluid blocks.
+                - Do not place water or lava source blocks at the selected footprint edge unless the user explicitly asks for a spill leaving the area.
+                - For fountains, put a solid basin floor under the water and a rim high enough to keep water inside the selected footprint.
+                - For falling water, include a catch basin below and close side gaps so the fluid cannot escape outside the build area.
                 """;
 
     private PromptFactory() {
@@ -41,6 +45,8 @@ public final class PromptFactory {
 
                 Important:
                 - Use loops, helper functions, symmetry, and fills. Be procedural and concise.
+                - Build mode starts from a cleared blank volume in the selected footprint. Do not rely on existing cliffs, trees, terrain, or blocks inside it.
+                - Place any ground plane, foundation, basin floor, supports, or terrain you need explicitly.
                 - Stay inside x/z bounds. y can grow upward.
                 %s
                 - Return only one JavaScript function named build.

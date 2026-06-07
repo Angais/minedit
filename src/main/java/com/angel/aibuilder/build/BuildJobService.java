@@ -16,31 +16,34 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 public final class BuildJobService {
     private static final OpenRouterClient OPENROUTER_CLIENT = new OpenRouterClient();
     private static final CodexLocalClient CODEX_CLIENT = new CodexLocalClient();
+    private static final BlockSpec AIR = new BlockSpec("minecraft:air", Map.of());
 
     private BuildJobService() {
     }
 
     public static void start(ServerPlayer player, BuildSelection selection, String userPrompt, AiRequestOptions options) {
-        startWithPrompt(player, selection, options, PromptFactory.create(selection, userPrompt), Map.of());
+        startWithPrompt(player, selection, options, PromptFactory.create(selection, userPrompt), Map.of(), true);
     }
 
     public static void edit(ServerPlayer player, BuildSelection selection, String userPrompt, AiRequestOptions options) {
         ExistingStructureScanner.BuildCode buildCode = ExistingStructureScanner.compile((ServerLevel) player.level(), selection);
-        startWithPrompt(player, selection, options, PromptFactory.edit(selection, buildCode.quickContext(), userPrompt), buildCode.lineMap());
+        startWithPrompt(player, selection, options, PromptFactory.edit(selection, buildCode.quickContext(), userPrompt), buildCode.lineMap(), false);
     }
 
     public static void quickEdit(ServerPlayer player, BuildSelection selection, String userPrompt, AiRequestOptions options) {
         ExistingStructureScanner.BuildCode buildCode = ExistingStructureScanner.compile((ServerLevel) player.level(), selection);
-        startWithPrompt(player, selection, options, PromptFactory.quickEdit(selection, buildCode.quickContext(), userPrompt), buildCode.lineMap());
+        startWithPrompt(player, selection, options, PromptFactory.quickEdit(selection, buildCode.quickContext(), userPrompt), buildCode.lineMap(), false);
     }
 
-    private static void startWithPrompt(ServerPlayer player, BuildSelection selection, AiRequestOptions options, String requestPrompt, Map<Integer, ExistingStructureScanner.Line> lines) {
+    private static void startWithPrompt(ServerPlayer player, BuildSelection selection, AiRequestOptions options, String requestPrompt, Map<Integer, ExistingStructureScanner.Line> lines, boolean clearBeforeBuild) {
         MinecraftServer server = player.level().getServer();
         CompletableFuture.supplyAsync(() -> {
             String prompt = null;
@@ -67,9 +70,33 @@ public final class BuildJobService {
                 currentPlayer.sendSystemMessage(Component.literal("Minedit failed: " + result.error.getMessage()).withStyle(ChatFormatting.RED));
                 return;
             }
-            currentPlayer.sendSystemMessage(Component.literal("Minedit: queued " + result.plan.operations().size() + " operations.").withStyle(ChatFormatting.GREEN));
-            BuildQueue.enqueue(new QueuedBuild(currentPlayer, selection, result.plan.operations()));
+            List<BuildOperation> operations = clearBeforeBuild
+                    ? withInitialClear((ServerLevel) currentPlayer.level(), selection, result.plan.operations())
+                    : result.plan.operations();
+            String message = "Minedit: queued " + operations.size() + " operations.";
+            if (clearBeforeBuild) {
+                message += " Build mode will clear existing blocks in the selected footprint first.";
+            }
+            currentPlayer.sendSystemMessage(Component.literal(message).withStyle(ChatFormatting.GREEN));
+            BuildQueue.enqueue(new QueuedBuild(currentPlayer, selection, operations));
         }));
+    }
+
+    private static List<BuildOperation> withInitialClear(ServerLevel level, BuildSelection selection, List<BuildOperation> operations) {
+        int maxRelativeY = level.getMaxY() - 1 - selection.baseY();
+        if (maxRelativeY < 0) {
+            return operations;
+        }
+
+        List<BuildOperation> withClear = new ArrayList<>(operations.size() + 1);
+        withClear.add(new FillOperation(
+                0, 0, 0,
+                selection.width() - 1, maxRelativeY, selection.depth() - 1,
+                AIR,
+                new FillOptions("clear", Map.of())
+        ));
+        withClear.addAll(operations);
+        return List.copyOf(withClear);
     }
 
     private static String complete(AiRequestOptions options, String prompt) throws Exception {

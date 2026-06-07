@@ -24,6 +24,7 @@ final class QueuedBuild {
     private FillCursor cursor;
     private int placed;
     private int skipped;
+    private int riskyFluidSkipped;
 
     QueuedBuild(ServerPlayer player, BuildSelection selection, List<BuildOperation> operations) {
         this.playerId = player.getUUID();
@@ -53,7 +54,11 @@ final class QueuedBuild {
 
             BuildOperation operation = operations.poll();
             if (operation == null) {
-                notifyPlayer("Minedit: build complete. Placed " + placed + " blocks, skipped " + skipped + ".");
+                String message = "Minedit: build complete. Placed " + placed + " blocks, skipped " + skipped + ".";
+                if (riskyFluidSkipped > 0) {
+                    message += " Blocked " + riskyFluidSkipped + " edge fluid blocks to reduce overflow.";
+                }
+                notifyPlayer(message);
                 return true;
             }
 
@@ -81,6 +86,10 @@ final class QueuedBuild {
         }
         BlockPos pos = toWorld(operation.x(), operation.y(), operation.z());
         if (!level.isInWorldBounds(pos)) {
+            return false;
+        }
+        if (isUnsafeFluidPlacement(state.get(), operation.x(), operation.z())) {
+            riskyFluidSkipped++;
             return false;
         }
         if (!canPlace(state.get(), pos)) {
@@ -144,17 +153,23 @@ final class QueuedBuild {
             }
 
             while (budget > 0 && !done()) {
+                BlockPos pos = new BlockPos(selection.minX() + x, selection.baseY() + y, selection.minZ() + z);
+                BlockState currentState = level.isInWorldBounds(pos) ? level.getBlockState(pos) : null;
                 boolean boundary = x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
-                boolean shouldPlace = switch (operation.options().mode()) {
+                String mode = operation.options().mode();
+                boolean shouldPlace = switch (mode) {
                     case "hollow", "outline" -> boundary;
+                    case "clear" -> currentState != null && !currentState.isAir();
                     case "keep" -> true;
                     default -> true;
                 };
 
-                BlockPos pos = new BlockPos(selection.minX() + x, selection.baseY() + y, selection.minZ() + z);
                 if (shouldPlace && insideFootprint(x, z) && level.isInWorldBounds(pos)) {
-                    if (!"keep".equals(operation.options().mode()) || level.getBlockState(pos).isAir()) {
-                        if (canPlace(state.get(), pos)) {
+                    if (!"keep".equals(mode) || currentState == null || currentState.isAir()) {
+                        if (isUnsafeFluidPlacement(state.get(), x, z)) {
+                            QueuedBuild.this.riskyFluidSkipped++;
+                            lastSkipped++;
+                        } else if (canPlace(state.get(), pos)) {
                             snapshot.capture(pos);
                             level.setBlock(pos, state.get(), 3);
                             lastPlaced++;
@@ -164,7 +179,7 @@ final class QueuedBuild {
                     } else {
                         lastSkipped++;
                     }
-                } else {
+                } else if (!"clear".equals(mode)) {
                     lastSkipped++;
                 }
 
@@ -195,5 +210,10 @@ final class QueuedBuild {
 
     private boolean canPlace(BlockState state, BlockPos pos) {
         return state.isAir() || state.canSurvive(level, pos);
+    }
+
+    private boolean isUnsafeFluidPlacement(BlockState state, int x, int z) {
+        return !state.getFluidState().isEmpty()
+                && (x <= 0 || z <= 0 || x >= selection.width() - 1 || z >= selection.depth() - 1);
     }
 }
