@@ -223,13 +223,13 @@ public final class OpenRouterClient {
         if (totalCost.isPresent()) {
             return totalCost;
         }
-        Optional<String> usage = nonZeroNumberString(object, "usage");
-        if (usage.isPresent()) {
-            return Optional.of(usage.get() + " OpenRouter");
-        }
         Optional<String> byokUsage = nonZeroNumberString(object, "byok_usage_inference");
         if (byokUsage.isPresent()) {
             return Optional.of(byokUsage.get() + " BYOK");
+        }
+        Optional<String> usage = nonZeroNumberString(object, "usage");
+        if (usage.isPresent()) {
+            return Optional.of(usage.get() + " OpenRouter");
         }
         Optional<String> upstreamUsage = nonZeroNumberString(object, "usage_upstream");
         if (upstreamUsage.isPresent()) {
@@ -240,13 +240,16 @@ public final class OpenRouterClient {
         if (fallback.isPresent()) {
             return fallback;
         }
-        fallback = numberString(object, "usage");
-        if (fallback.isPresent()) {
-            return Optional.of(fallback.get() + " OpenRouter");
-        }
         fallback = numberString(object, "byok_usage_inference");
         if (fallback.isPresent()) {
             return Optional.of(fallback.get() + " BYOK");
+        }
+        if (bool(object, "is_byok")) {
+            return Optional.empty();
+        }
+        fallback = numberString(object, "usage");
+        if (fallback.isPresent()) {
+            return Optional.of(fallback.get() + " OpenRouter");
         }
         fallback = numberString(object, "usage_upstream");
         if (fallback.isPresent()) {
@@ -283,6 +286,11 @@ public final class OpenRouterClient {
     private static String string(JsonObject object, String key, String fallback) {
         JsonElement value = object.get(key);
         return value != null && value.isJsonPrimitive() && !value.isJsonNull() ? value.getAsString() : fallback;
+    }
+
+    private static boolean bool(JsonObject object, String key) {
+        JsonElement value = object.get(key);
+        return value != null && value.isJsonPrimitive() && !value.isJsonNull() && value.getAsBoolean();
     }
 
     private record GenerationUsage(String summary, boolean hasCost) {
