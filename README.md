@@ -23,6 +23,18 @@ Back up worlds before testing large builds or edits.
 
 ## Installation
 
+You can either download a prebuilt jar from the GitHub Releases page or build it yourself.
+
+### Download a Release
+
+1. Download the latest jar from the [Minedit releases page](https://github.com/Angais/minedit/releases).
+
+2. Copy the jar into your Minecraft `mods` folder.
+
+3. Start the NeoForge profile.
+
+### Build from Source
+
 1. Build the jar:
 
    ```sh
