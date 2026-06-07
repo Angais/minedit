@@ -1,6 +1,6 @@
 # Minedit
 
-Minedit is an experimental NeoForge mod for building and editing Minecraft structures with OpenRouter models.
+Minedit is an experimental NeoForge mod for building and editing Minecraft structures with AI models through OpenRouter or a local Codex bridge.
 
 Select a footprint with a stick, describe what you want, and Minedit asks a model to generate compact builder code that places blocks in the selected area. It also supports editing existing builds with compact line-aware patches.
 
@@ -8,7 +8,7 @@ Select a footprint with a stick, describe what you want, and Minedit asks a mode
 
 Minedit is a work in progress. Expect things to break.
 
-This mod sends prompts to OpenRouter using the API key you configure. Depending on your OpenRouter account, model, and usage, requests may cost money. You are responsible for all usage and charges caused by your API key. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, or other side effects.
+This mod sends prompts to the provider you configure. OpenRouter requests use the API key you configure. Codex local bridge requests use your local Codex/OpenAI login and may consume Codex or ChatGPT limits. Depending on your provider, model, account, and usage, requests may cost money or consume plan limits. You are responsible for all usage and charges caused by your configured provider. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, or other side effects.
 
 Your OpenRouter API key is stored in plaintext in your Minecraft game directory at `config/minedit.properties`. It is not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it.
 
@@ -19,7 +19,7 @@ Back up worlds before testing large builds or edits.
 - Minecraft `26.1.2`
 - NeoForge `26.1.2.73`
 - Java 25 for development/building
-- An OpenRouter API key
+- Either an OpenRouter API key, or Node.js 18+ plus the Codex CLI for the local Codex bridge
 
 ## Installation
 
@@ -47,6 +47,8 @@ You can either download a prebuilt jar from the GitHub Releases page or build it
 
 ## Basic Use
 
+Minedit uses OpenRouter by default.
+
 1. Set your OpenRouter key:
 
    ```mcfunction
@@ -68,6 +70,45 @@ You can either download a prebuilt jar from the GitHub Releases page or build it
    ```
 
 Minedit uses the selected X/Z area as the footprint. Height is not capped by the selection.
+
+## Local Codex Bridge
+
+You can use a local Codex bridge instead of OpenRouter. This keeps the Minecraft mod simple: Minecraft calls a small localhost HTTP server, and that server talks to `codex app-server`.
+
+Requirements:
+
+- Node.js 18+
+- Codex CLI installed and logged in
+- This repository or source zip available locally, because the bridge code lives in `bridge/`
+
+Run this once in a terminal if Codex is not logged in:
+
+```sh
+codex login
+```
+
+Start the bridge from the repository:
+
+```sh
+npm --prefix bridge start
+```
+
+The bridge listens on:
+
+```text
+http://127.0.0.1:8765
+```
+
+Then in Minecraft:
+
+```mcfunction
+/provider codex-local
+/codexurl http://127.0.0.1:8765
+/codex status
+/model gpt-5.5
+```
+
+Codex model ids usually do not use the OpenRouter `openai/` prefix. The bridge will strip `openai/` automatically, so `openai/gpt-5.5` becomes `gpt-5.5`, but setting `/model gpt-5.5` is clearer when using Codex.
 
 ## Examples
 
@@ -126,7 +167,7 @@ Quick edit uses a compact line-aware representation of the current build, so mod
 Set the normal build/edit model:
 
 ```mcfunction
-/model <openrouter-model-id>
+/model <model-id>
 ```
 
 Default model:
@@ -135,10 +176,20 @@ Default model:
 openai/gpt-5.5
 ```
 
+Provider commands:
+
+```mcfunction
+/provider openrouter
+/provider codex-local
+/codexurl http://127.0.0.1:8765
+/codex status
+```
+
 Set normal reasoning effort:
 
 ```mcfunction
 /effort none
+/effort minimal
 /effort low
 /effort medium
 /effort high
@@ -163,7 +214,7 @@ Default quick edit effort:
 low
 ```
 
-Settings are saved in `config/minedit.properties`. The OpenRouter API key in that file is plaintext and belongs to the whole Minecraft game directory/profile, not a single world. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
+Settings are saved in `config/minedit.properties`. The OpenRouter API key in that file is plaintext and belongs to the whole Minecraft game directory/profile, not a single world. The Codex bridge URL and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
 
 ## Reset Commands
 
@@ -205,3 +256,4 @@ Model output is still imperfect. Use `/reset build` and world backups while test
 - Uses NeoForge for Minecraft mod loading and APIs.
 - Bundles Mozilla Rhino `1.8.0` as the JavaScript runtime through NeoForge Jar-in-Jar. Rhino is licensed under the Mozilla Public License 2.0: https://www.mozilla.org/MPL/2.0/
 - Uses OpenRouter's OpenAI-compatible chat completions API.
+- Optionally uses the OpenAI Codex app-server through the local `bridge/` helper.

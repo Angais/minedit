@@ -1,24 +1,31 @@
 package com.angel.aibuilder.commands;
 
+import com.angel.aibuilder.ai.AiProvider;
+import com.angel.aibuilder.ai.AiRequestOptions;
 import com.angel.aibuilder.build.BuildJobService;
 import com.angel.aibuilder.build.BuildQueue;
 import com.angel.aibuilder.build.BuildUndoManager;
+import com.angel.aibuilder.codex.CodexLocalClient;
 import com.angel.aibuilder.config.AiBuilderSettings;
 import com.angel.aibuilder.selection.BuildSelection;
 import com.angel.aibuilder.selection.SelectionManager;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.ChatFormatting;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 import java.io.IOException;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 public class AiBuilderCommands {
-    private static final Set<String> EFFORTS = Set.of("none", "low", "medium", "high", "xhigh");
+    private static final Set<String> EFFORTS = Set.of("none", "minimal", "low", "medium", "high", "xhigh");
+    private static final CodexLocalClient CODEX_CLIENT = new CodexLocalClient();
 
     @SubscribeEvent
     public void register(RegisterCommandsEvent event) {
@@ -34,17 +41,74 @@ public class AiBuilderCommands {
                             return 1;
                         })));
 
+        event.getDispatcher().register(Commands.literal("provider")
+                .then(Commands.argument("provider", StringArgumentType.word())
+                        .executes(ctx -> {
+                            String providerId = StringArgumentType.getString(ctx, "provider");
+                            AiProvider provider = AiProvider.fromId(providerId).orElse(null);
+                            if (provider == null) {
+                                ctx.getSource().sendFailure(Component.literal("Provider must be one of: " + AiProvider.ids() + "."));
+                                return 0;
+                            }
+                            try {
+                                AiBuilderSettings.setProvider(provider.id());
+                                if (provider == AiProvider.CODEX_LOCAL) {
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Codex local bridge. Start it with `npm --prefix bridge start`, then use /codex status.").withStyle(ChatFormatting.GREEN), false);
+                                } else {
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to OpenRouter.").withStyle(ChatFormatting.GREEN), false);
+                                }
+                            } catch (IOException e) {
+                                ctx.getSource().sendFailure(Component.literal("Could not save provider: " + e.getMessage()));
+                            }
+                            return 1;
+                        })));
+
+        event.getDispatcher().register(Commands.literal("codexurl")
+                .then(Commands.argument("url", StringArgumentType.greedyString())
+                        .executes(ctx -> {
+                            try {
+                                String url = StringArgumentType.getString(ctx, "url");
+                                AiBuilderSettings.setCodexUrl(url);
+                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit Codex bridge URL set to " + url).withStyle(ChatFormatting.GREEN), false);
+                            } catch (IOException e) {
+                                ctx.getSource().sendFailure(Component.literal("Could not save Codex bridge URL: " + e.getMessage()));
+                            }
+                            return 1;
+                        })));
+
+        event.getDispatcher().register(Commands.literal("codex")
+                .then(Commands.literal("status")
+                        .executes(ctx -> {
+                            CommandSourceStack source = ctx.getSource();
+                            MinecraftServer server = source.getServer();
+                            String url = AiBuilderSettings.codexUrl();
+                            String model = AiBuilderSettings.model();
+                            source.sendSuccess(() -> Component.literal("Minedit: checking Codex bridge at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
+                            CompletableFuture.supplyAsync(() -> {
+                                try {
+                                    return CODEX_CLIENT.status(url, model);
+                                } catch (Exception e) {
+                                    throw new RuntimeException(e);
+                                }
+                            }).thenAccept(status -> server.execute(() -> sendCodexStatus(source, status, model)))
+                                    .exceptionally(error -> {
+                                        server.execute(() -> source.sendFailure(Component.literal("Minedit Codex bridge error: " + rootMessage(error))));
+                                        return null;
+                                    });
+                            return 1;
+                        })));
+
         event.getDispatcher().register(Commands.literal("effort")
                 .then(Commands.argument("effort", StringArgumentType.word())
                         .executes(ctx -> {
                             String effort = StringArgumentType.getString(ctx, "effort").trim().toLowerCase();
                             if (!EFFORTS.contains(effort)) {
-                                ctx.getSource().sendFailure(Component.literal("Effort must be one of: none, low, medium, high, xhigh."));
+                                ctx.getSource().sendFailure(Component.literal("Effort must be one of: none, minimal, low, medium, high, xhigh."));
                                 return 0;
                             }
                             try {
                                 AiBuilderSettings.setEffort(effort);
-                                ctx.getSource().sendSuccess(() -> Component.literal("OpenRouter reasoning effort set to " + effort).withStyle(ChatFormatting.GREEN), false);
+                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit reasoning effort set to " + effort).withStyle(ChatFormatting.GREEN), false);
                             } catch (IOException e) {
                                 ctx.getSource().sendFailure(Component.literal("Could not save effort: " + e.getMessage()));
                             }
@@ -57,7 +121,7 @@ public class AiBuilderCommands {
                             try {
                                 String model = StringArgumentType.getString(ctx, "model");
                                 AiBuilderSettings.setModel(model);
-                                ctx.getSource().sendSuccess(() -> Component.literal("OpenRouter model set to " + model).withStyle(ChatFormatting.GREEN), false);
+                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit model set to " + model).withStyle(ChatFormatting.GREEN), false);
                             } catch (IOException e) {
                                 ctx.getSource().sendFailure(Component.literal("Could not save model: " + e.getMessage()));
                             }
@@ -68,9 +132,8 @@ public class AiBuilderCommands {
                 .then(Commands.argument("prompt", StringArgumentType.greedyString())
                         .executes(ctx -> {
                             ServerPlayer player = ctx.getSource().getPlayerOrException();
-                            String apiKey = AiBuilderSettings.apiKey();
-                            if (apiKey.isEmpty()) {
-                                ctx.getSource().sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>."));
+                            AiRequestOptions options = requestOptions(ctx.getSource(), false);
+                            if (options == null) {
                                 return 0;
                             }
 
@@ -81,10 +144,8 @@ public class AiBuilderCommands {
                             }
 
                             String prompt = StringArgumentType.getString(ctx, "prompt");
-                            String model = AiBuilderSettings.model();
-                            String effort = AiBuilderSettings.effort();
-                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit: asking " + model + " (" + effort + ") to build...").withStyle(ChatFormatting.YELLOW), false);
-                            BuildJobService.start(player, selection, prompt, apiKey, model, effort);
+                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit: asking " + options.targetDescription() + " (" + options.effort() + ") to build...").withStyle(ChatFormatting.YELLOW), false);
+                            BuildJobService.start(player, selection, prompt, options);
                             return 1;
                         })));
 
@@ -95,7 +156,7 @@ public class AiBuilderCommands {
                                         .executes(ctx -> {
                                             String effort = StringArgumentType.getString(ctx, "effort").trim().toLowerCase();
                                             if (!EFFORTS.contains(effort)) {
-                                                ctx.getSource().sendFailure(Component.literal("Quick edit effort must be one of: none, low, medium, high, xhigh."));
+                                                ctx.getSource().sendFailure(Component.literal("Quick edit effort must be one of: none, minimal, low, medium, high, xhigh."));
                                                 return 0;
                                             }
                                             try {
@@ -110,9 +171,8 @@ public class AiBuilderCommands {
                         .then(Commands.argument("prompt", StringArgumentType.greedyString())
                                 .executes(ctx -> {
                                     ServerPlayer player = ctx.getSource().getPlayerOrException();
-                                    String apiKey = AiBuilderSettings.apiKey();
-                                    if (apiKey.isEmpty()) {
-                                        ctx.getSource().sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>."));
+                                    AiRequestOptions options = requestOptions(ctx.getSource(), true);
+                                    if (options == null) {
                                         return 0;
                                     }
 
@@ -123,18 +183,15 @@ public class AiBuilderCommands {
                                     }
 
                                     String prompt = StringArgumentType.getString(ctx, "prompt");
-                                    String model = AiBuilderSettings.model();
-                                    String effort = AiBuilderSettings.quickEffort();
-                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit: asking " + model + " (" + effort + ") for a quick edit...").withStyle(ChatFormatting.YELLOW), false);
-                                    BuildJobService.quickEdit(player, selection, prompt, apiKey, model, effort);
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit: asking " + options.targetDescription() + " (" + options.effort() + ") for a quick edit...").withStyle(ChatFormatting.YELLOW), false);
+                                    BuildJobService.quickEdit(player, selection, prompt, options);
                                     return 1;
                                 })))
                 .then(Commands.argument("prompt", StringArgumentType.greedyString())
                         .executes(ctx -> {
                             ServerPlayer player = ctx.getSource().getPlayerOrException();
-                            String apiKey = AiBuilderSettings.apiKey();
-                            if (apiKey.isEmpty()) {
-                                ctx.getSource().sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>."));
+                            AiRequestOptions options = requestOptions(ctx.getSource(), false);
+                            if (options == null) {
                                 return 0;
                             }
 
@@ -145,10 +202,8 @@ public class AiBuilderCommands {
                             }
 
                             String prompt = StringArgumentType.getString(ctx, "prompt");
-                            String model = AiBuilderSettings.model();
-                            String effort = AiBuilderSettings.effort();
-                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit: asking " + model + " (" + effort + ") to edit...").withStyle(ChatFormatting.YELLOW), false);
-                            BuildJobService.edit(player, selection, prompt, apiKey, model, effort);
+                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit: asking " + options.targetDescription() + " (" + options.effort() + ") to edit...").withStyle(ChatFormatting.YELLOW), false);
+                            BuildJobService.edit(player, selection, prompt, options);
                             return 1;
                         })));
 
@@ -172,5 +227,45 @@ public class AiBuilderCommands {
                             ctx.getSource().sendSuccess(() -> Component.literal("Minedit: selection cleared.").withStyle(ChatFormatting.GREEN), false);
                             return 1;
                         })));
+    }
+
+    private static AiRequestOptions requestOptions(CommandSourceStack source, boolean quick) {
+        AiProvider provider = AiProvider.fromId(AiBuilderSettings.provider()).orElse(AiProvider.OPENROUTER);
+        String model = AiBuilderSettings.model();
+        String effort = quick ? AiBuilderSettings.quickEffort() : AiBuilderSettings.effort();
+        if (provider == AiProvider.CODEX_LOCAL) {
+            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort);
+        }
+
+        String apiKey = AiBuilderSettings.apiKey();
+        if (apiKey.isEmpty()) {
+            source.sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>, or use /provider codex-local."));
+            return null;
+        }
+        return new AiRequestOptions(provider, apiKey, "", model, effort);
+    }
+
+    private static void sendCodexStatus(CommandSourceStack source, CodexLocalClient.Status status, String currentModel) {
+        if (status.needsLogin()) {
+            source.sendFailure(Component.literal("Codex bridge connected, but Codex is not logged in. Run `codex login` in a terminal, then restart the bridge."));
+            return;
+        }
+        source.sendSuccess(() -> Component.literal("Codex bridge connected. Auth: " + status.authLabel() + ". Models: " + status.modelCount() + ".").withStyle(ChatFormatting.GREEN), false);
+        if (!status.defaultModel().isEmpty()) {
+            source.sendSuccess(() -> Component.literal("Codex default model: " + status.defaultModel()).withStyle(ChatFormatting.GRAY), false);
+        }
+        if (status.currentModelAvailable()) {
+            source.sendSuccess(() -> Component.literal("Current model works with Codex as " + status.normalizedCurrentModel() + ". Supported efforts: " + String.join(", ", status.supportedEfforts())).withStyle(ChatFormatting.GREEN), false);
+        } else {
+            source.sendFailure(Component.literal("Current model `" + currentModel + "` was not found in Codex. Try /model gpt-5.5."));
+        }
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage();
     }
 }

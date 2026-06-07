@@ -14,7 +14,7 @@ public class PlayerWarningEvents {
         }
 
         player.sendSystemMessage(Component.literal("Minedit is a work in progress. Expect things to break.").withStyle(ChatFormatting.GOLD));
-        player.sendSystemMessage(Component.literal("AI requests use your configured OpenRouter account/API key and may cause charges.").withStyle(ChatFormatting.YELLOW));
+        player.sendSystemMessage(Component.literal("AI requests use your configured provider, OpenRouter or a local Codex bridge, and may cause charges or consume limits.").withStyle(ChatFormatting.YELLOW));
         player.sendSystemMessage(Component.literal("Use Minedit at your own risk; the author is not responsible for unexpected costs, world changes, or other side effects.").withStyle(ChatFormatting.RED));
     }
 }

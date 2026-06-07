@@ -1,0 +1,12 @@
+{
+  "name": "minedit-codex-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node minedit-codex-bridge.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

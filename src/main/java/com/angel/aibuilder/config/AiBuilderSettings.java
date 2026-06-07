@@ -23,6 +23,16 @@ public final class AiBuilderSettings {
         return PROPERTIES.getProperty("openrouter_api_key", "").trim();
     }
 
+    public static synchronized String provider() {
+        load();
+        return PROPERTIES.getProperty("provider", "openrouter").trim();
+    }
+
+    public static synchronized String codexUrl() {
+        load();
+        return PROPERTIES.getProperty("codex_url", "http://127.0.0.1:8765").trim();
+    }
+
     public static synchronized String model() {
         load();
         return PROPERTIES.getProperty("model", "openai/gpt-5.5").trim();
@@ -41,6 +51,18 @@ public final class AiBuilderSettings {
     public static synchronized void setApiKey(String key) throws IOException {
         load();
         PROPERTIES.setProperty("openrouter_api_key", key.trim());
+        save();
+    }
+
+    public static synchronized void setProvider(String provider) throws IOException {
+        load();
+        PROPERTIES.setProperty("provider", provider.trim());
+        save();
+    }
+
+    public static synchronized void setCodexUrl(String url) throws IOException {
+        load();
+        PROPERTIES.setProperty("codex_url", url.trim());
         save();
     }
 
