@@ -18,6 +18,14 @@ public class BuildQueue {
         BUILDS.removeIf(build -> build.isFor(playerId));
     }
 
+    public static boolean hasBuildFor(UUID playerId) {
+        return BUILDS.stream().anyMatch(build -> build.isFor(playerId));
+    }
+
+    public static int size() {
+        return BUILDS.size();
+    }
+
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
         BuildUndoManager.tickRestores();

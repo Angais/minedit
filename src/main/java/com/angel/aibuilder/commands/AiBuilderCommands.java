@@ -128,6 +128,12 @@ public class AiBuilderCommands {
                             return 1;
                         })));
 
+        event.getDispatcher().register(Commands.literal("status")
+                .executes(ctx -> {
+                    sendStatus(ctx.getSource());
+                    return 1;
+                }));
+
         event.getDispatcher().register(Commands.literal("build")
                 .then(Commands.argument("prompt", StringArgumentType.greedyString())
                         .executes(ctx -> {
@@ -243,6 +249,37 @@ public class AiBuilderCommands {
             return null;
         }
         return new AiRequestOptions(provider, apiKey, "", model, effort);
+    }
+
+    private static void sendStatus(CommandSourceStack source) {
+        AiProvider provider = AiProvider.fromId(AiBuilderSettings.provider()).orElse(AiProvider.OPENROUTER);
+        String model = AiBuilderSettings.model();
+        String effort = AiBuilderSettings.effort();
+        String quickEffort = AiBuilderSettings.quickEffort();
+        String codexUrl = AiBuilderSettings.codexUrl();
+        boolean hasOpenRouterKey = !AiBuilderSettings.apiKey().isEmpty();
+
+        source.sendSuccess(() -> Component.literal("Minedit status").withStyle(ChatFormatting.GOLD), false);
+        source.sendSuccess(() -> Component.literal("Provider: " + provider.displayName() + " (" + provider.id() + ")").withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Model: " + model).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Reasoning effort: " + effort).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Quick edit effort: " + quickEffort).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
+        source.sendSuccess(() -> Component.literal("Codex bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Queued builds/edits: " + BuildQueue.size()).withStyle(ChatFormatting.GRAY), false);
+
+        if (source.getEntity() instanceof ServerPlayer player) {
+            SelectionManager.selection(player.getUUID()).ifPresentOrElse(selection -> {
+                String text = "Selection: "
+                        + selection.width() + " x " + selection.depth()
+                        + " footprint at base Y " + selection.baseY()
+                        + " from X " + selection.minX() + ".." + selection.maxX()
+                        + ", Z " + selection.minZ() + ".." + selection.maxZ();
+                source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GREEN), false);
+            }, () -> source.sendSuccess(() -> Component.literal("Selection: none").withStyle(ChatFormatting.YELLOW), false));
+
+            source.sendSuccess(() -> Component.literal("Your queued build/edit: " + (BuildQueue.hasBuildFor(player.getUUID()) ? "yes" : "no")).withStyle(ChatFormatting.GRAY), false);
+        }
     }
 
     private static void sendCodexStatus(CommandSourceStack source, CodexLocalClient.Status status, String currentModel) {

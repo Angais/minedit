@@ -183,6 +183,7 @@ Provider commands:
 /provider codex-local
 /codexurl http://127.0.0.1:8765
 /codex status
+/status
 ```
 
 Set normal reasoning effort:
