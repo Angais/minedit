@@ -285,26 +285,6 @@ Minedit prompts models to avoid common Minecraft placement problems such as unsu
 
 Model output is still imperfect. Use `/reset build` and world backups while testing.
 
-## Release Checklist
-
-Before publishing a release:
-
-1. Build the jar with `./gradlew build`.
-2. Test a normal `/build`, `/build stages`, `/edit quick`, `/reset build`, and `/status` in a disposable world.
-3. If testing Codex, restart the bridge with `npm --prefix bridge start` and test `/codex status`.
-4. Search for secrets before committing:
-
-   ```sh
-   rg -n "sk-|api[_ -]?key|OPENAI|OPENROUTER|gmail|@" . --hidden -g '!.git/**' -g '!build/**' -g '!.gradle/**' -g '!*.jar'
-   git log --format='%h %an <%ae> %cn <%ce>' --all | sort -u
-   ```
-
-5. Confirm the jar path for the release:
-
-   ```text
-   build/libs/minedit-1.2.0.jar
-   ```
-
 ## Credits and Third-Party Technology
 
 - Built with the NeoForge MDK template. The template files are MIT licensed by the NeoForged project; see `TEMPLATE_LICENSE.txt`.
