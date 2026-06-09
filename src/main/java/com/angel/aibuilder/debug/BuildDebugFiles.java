@@ -9,6 +9,8 @@ import java.nio.file.Path;
 
 public final class BuildDebugFiles {
     private static final Path DIR = FMLPaths.CONFIGDIR.get().resolve("minedit-debug");
+    private static final Path EXPORT_PROMPT = DIR.resolve("export-prompt.txt");
+    private static final Path IMPORT_BUILD = DIR.resolve("import-build.js");
 
     private BuildDebugFiles() {
     }
@@ -22,5 +24,22 @@ public final class BuildDebugFiles {
         } catch (IOException ignored) {
             // Debug dumps should never make the build fail.
         }
+    }
+
+    public static Path writeExportPrompt(String prompt) throws IOException {
+        Files.createDirectories(DIR);
+        Files.writeString(EXPORT_PROMPT, prompt == null ? "" : prompt, StandardCharsets.UTF_8);
+        if (!Files.exists(IMPORT_BUILD)) {
+            Files.writeString(IMPORT_BUILD, "", StandardCharsets.UTF_8);
+        }
+        return EXPORT_PROMPT;
+    }
+
+    public static Path importBuildPath() {
+        return IMPORT_BUILD;
+    }
+
+    public static String readImportBuild() throws IOException {
+        return Files.readString(IMPORT_BUILD, StandardCharsets.UTF_8);
     }
 }

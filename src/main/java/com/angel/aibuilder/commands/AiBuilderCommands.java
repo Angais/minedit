@@ -7,6 +7,7 @@ import com.angel.aibuilder.build.BuildQueue;
 import com.angel.aibuilder.build.BuildUndoManager;
 import com.angel.aibuilder.codex.CodexLocalClient;
 import com.angel.aibuilder.config.AiBuilderSettings;
+import com.angel.aibuilder.debug.BuildDebugFiles;
 import com.angel.aibuilder.openrouter.OpenRouterClient;
 import com.angel.aibuilder.selection.BuildSelection;
 import com.angel.aibuilder.selection.SelectionManager;
@@ -21,6 +22,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -203,6 +205,67 @@ public class AiBuilderCommands {
                         })));
 
         event.getDispatcher().register(Commands.literal("build")
+                .then(Commands.literal("export")
+                        .then(Commands.argument("prompt", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                    BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+                                    if (selection == null) {
+                                        ctx.getSource().sendFailure(Component.literal("Select two footprint corners first by right-clicking blocks with a stick."));
+                                        return 0;
+                                    }
+
+                                    String prompt = StringArgumentType.getString(ctx, "prompt");
+                                    try {
+                                        Path path = BuildJobService.exportBuildPrompt(selection, prompt);
+                                        Path importPath = BuildDebugFiles.importBuildPath();
+                                        ctx.getSource().sendSuccess(() -> Component.literal("Minedit export written to " + path + ". Paste the model response or build(api) code into " + importPath + ", then run /build import.").withStyle(ChatFormatting.GREEN), false);
+                                    } catch (IOException e) {
+                                        ctx.getSource().sendFailure(Component.literal("Could not export Minedit prompt: " + e.getMessage()));
+                                        return 0;
+                                    }
+                                    return 1;
+                                })))
+                .then(Commands.literal("import")
+                        .executes(ctx -> {
+                            ServerPlayer player = ctx.getSource().getPlayerOrException();
+                            BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+                            if (selection == null) {
+                                ctx.getSource().sendFailure(Component.literal("Select two footprint corners first by right-clicking blocks with a stick."));
+                                return 0;
+                            }
+
+                            Path importPath = BuildDebugFiles.importBuildPath();
+                            String responseOrCode;
+                            try {
+                                responseOrCode = BuildDebugFiles.readImportBuild();
+                            } catch (IOException e) {
+                                ctx.getSource().sendFailure(Component.literal("Could not read Minedit import file " + importPath + ": " + e.getMessage()));
+                                return 0;
+                            }
+                            if (responseOrCode.isBlank()) {
+                                ctx.getSource().sendFailure(Component.literal("Minedit import file is empty. Paste the model response or build(api) code into " + importPath + "."));
+                                return 0;
+                            }
+
+                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit import: reading " + importPath + "...").withStyle(ChatFormatting.YELLOW), false);
+                            BuildJobService.importBuild(player, selection, responseOrCode);
+                            return 1;
+                        })
+                        .then(Commands.argument("code", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                    BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+                                    if (selection == null) {
+                                        ctx.getSource().sendFailure(Component.literal("Select two footprint corners first by right-clicking blocks with a stick."));
+                                        return 0;
+                                    }
+
+                                    String responseOrCode = StringArgumentType.getString(ctx, "code");
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit import: parsing pasted code...").withStyle(ChatFormatting.YELLOW), false);
+                                    BuildJobService.importBuild(player, selection, responseOrCode);
+                                    return 1;
+                                })))
                 .then(Commands.literal("agent")
                         .then(Commands.literal("step-by-step")
                                 .then(Commands.argument("prompt", StringArgumentType.greedyString())

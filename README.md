@@ -172,6 +172,8 @@ Codex model ids usually do not use the OpenRouter `openai/` prefix. The bridge s
 /codexurl http://127.0.0.1:8765
 /codex status
 /model <model-id>
+/build export <prompt>
+/build import
 /effort none
 /effort minimal
 /effort low
@@ -203,6 +205,24 @@ OpenRouter streaming: enabled
 `/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, streaming setting, key/bridge configuration, current selection, active AI generations, and queued block placement jobs.
 
 Settings are saved in `config/minedit.properties`. The OpenRouter API key in that file is plaintext and belongs to the whole Minecraft game directory/profile, not a single world. The Codex bridge URL and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
+
+## Manual Export and Import
+
+To use a model outside Minedit without making an in-game API call:
+
+```mcfunction
+/build export <prompt>
+```
+
+This writes the exact build prompt to `config/minedit-debug/export-prompt.txt` and creates `config/minedit-debug/import-build.js` if needed. Send the exported prompt to a model yourself, then paste either the full model response or just the returned `function build(api) { ... }` code into `import-build.js`.
+
+Then select the same footprint in Minecraft and run:
+
+```mcfunction
+/build import
+```
+
+Minedit parses the imported response through the same build-code parser used for API responses, clears the selected footprint like normal build mode, and queues the resulting block operations. For very small snippets, `/build import <code>` also works, but the file workflow is safer for real generated builds.
 
 ## OpenRouter Usage and Cost
 

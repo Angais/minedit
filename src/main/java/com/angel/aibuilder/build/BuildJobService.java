@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -134,6 +136,40 @@ public final class BuildJobService {
 
     public static void start(ServerPlayer player, BuildSelection selection, String userPrompt, AiRequestOptions options) {
         startWithPrompt(player, selection, options, PromptFactory.create(selection, userPrompt), Map.of(), true);
+    }
+
+    public static Path exportBuildPrompt(BuildSelection selection, String userPrompt) throws IOException {
+        return BuildDebugFiles.writeExportPrompt(PromptFactory.create(selection, userPrompt));
+    }
+
+    public static void importBuild(ServerPlayer player, BuildSelection selection, String responseOrCode) {
+        MinecraftServer server = player.level().getServer();
+        UUID playerId = player.getUUID();
+        CompletableFuture.supplyAsync(() -> {
+            String code = null;
+            try {
+                code = ResponseParser.extractCode(responseOrCode);
+                BuildDebugFiles.writeLast("", responseOrCode, code);
+                BuildPlan plan = JsBuildRunner.run(code, selection.width(), selection.depth());
+                return new Result(code, plan, "", "", null);
+            } catch (Exception e) {
+                BuildDebugFiles.writeLast("", responseOrCode, code);
+                return new Result(null, null, "", "", e);
+            }
+        }).thenAccept(result -> server.execute(() -> {
+            ServerPlayer currentPlayer = server.getPlayerList().getPlayer(playerId);
+            if (currentPlayer == null) {
+                return;
+            }
+            if (result.error != null) {
+                AiBuilderMod.LOGGER.error("Imported Minedit build failed", result.error);
+                currentPlayer.sendSystemMessage(Component.literal("Minedit import failed: " + result.error.getMessage()).withStyle(ChatFormatting.RED));
+                return;
+            }
+            List<BuildOperation> operations = withInitialClear((ServerLevel) currentPlayer.level(), selection, result.plan.operations());
+            currentPlayer.sendSystemMessage(Component.literal("Minedit import: queued " + operations.size() + " operations. Build mode will clear existing blocks in the selected footprint first.").withStyle(ChatFormatting.GREEN));
+            BuildQueue.enqueue(new QueuedBuild(currentPlayer, selection, operations));
+        }));
     }
 
     public static void stagedBuild(ServerPlayer player, BuildSelection selection, String userPrompt, AiRequestOptions options) {
