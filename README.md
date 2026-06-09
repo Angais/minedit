@@ -178,6 +178,7 @@ Codex model ids usually do not use the OpenRouter `openai/` prefix. The bridge s
 /effort medium
 /effort high
 /effort xhigh
+/effort max
 /streaming enabled
 /streaming disabled
 /stop

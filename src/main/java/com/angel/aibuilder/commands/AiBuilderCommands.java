@@ -25,7 +25,8 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 public class AiBuilderCommands {
-    private static final Set<String> EFFORTS = Set.of("none", "minimal", "low", "medium", "high", "xhigh");
+    private static final String EFFORT_LIST = "none, minimal, low, medium, high, xhigh, max";
+    private static final Set<String> EFFORTS = Set.of("none", "minimal", "low", "medium", "high", "xhigh", "max");
     private static final Set<String> ENABLED_VALUES = Set.of("enabled", "enable", "on", "true", "yes");
     private static final Set<String> DISABLED_VALUES = Set.of("disabled", "disable", "off", "false", "no");
     private static final CodexLocalClient CODEX_CLIENT = new CodexLocalClient();
@@ -107,7 +108,7 @@ public class AiBuilderCommands {
                         .executes(ctx -> {
                             String effort = StringArgumentType.getString(ctx, "effort").trim().toLowerCase();
                             if (!EFFORTS.contains(effort)) {
-                                ctx.getSource().sendFailure(Component.literal("Effort must be one of: none, minimal, low, medium, high, xhigh."));
+                                ctx.getSource().sendFailure(Component.literal("Effort must be one of: " + EFFORT_LIST + "."));
                                 return 0;
                             }
                             try {
@@ -297,7 +298,7 @@ public class AiBuilderCommands {
                                         .executes(ctx -> {
                                             String effort = StringArgumentType.getString(ctx, "effort").trim().toLowerCase();
                                             if (!EFFORTS.contains(effort)) {
-                                                ctx.getSource().sendFailure(Component.literal("Quick edit effort must be one of: none, minimal, low, medium, high, xhigh."));
+                                                ctx.getSource().sendFailure(Component.literal("Quick edit effort must be one of: " + EFFORT_LIST + "."));
                                                 return 0;
                                             }
                                             try {
