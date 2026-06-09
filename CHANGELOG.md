@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.5.0
+
+### Added
+
+- `/build export <prompt>` writes the exact normal build prompt to `config/minedit-debug/export-prompt.txt` for use with an external model.
+- `/build import` reads `config/minedit-debug/import-build.js`, parses a full model response or raw `function build(api) { ... }` code, and queues it through the normal build path.
+- GitHub Actions now uploads the built mod jar as an artifact.
+
+### Changed
+
+- `/effort max` and `/edit set quickeffort max` are now accepted for models that support max reasoning effort.
+
 ## 1.4.0
 
 ### Changed
