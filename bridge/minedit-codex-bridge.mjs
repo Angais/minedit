@@ -12,7 +12,9 @@ import zlib from "node:zlib";
 const HOST = process.env.MINEDIT_BRIDGE_HOST || "127.0.0.1";
 const PORT = Number(process.env.MINEDIT_BRIDGE_PORT || 8765);
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
+const CURSOR_BIN = process.env.CURSOR_BIN || "agent";
 const REQUEST_TIMEOUT_MS = Number(process.env.MINEDIT_CODEX_TIMEOUT_MS || 10 * 60 * 1000);
+const CURSOR_TIMEOUT_MS = Number(process.env.MINEDIT_CURSOR_TIMEOUT_MS || 10 * 60 * 1000);
 const RPC_TIMEOUT_MS = Number(process.env.MINEDIT_CODEX_RPC_TIMEOUT_MS || 30 * 1000);
 const MAX_BODY_BYTES = Number(process.env.MINEDIT_BRIDGE_MAX_BODY_BYTES || 5 * 1024 * 1024);
 const AGENT_MAX_REVISIONS = Math.max(1, Number(process.env.MINEDIT_AGENT_MAX_REVISIONS || 2));
@@ -21,6 +23,33 @@ const PREVIEW_DIR = process.env.MINEDIT_AGENT_PREVIEW_DIR || path.join(process.c
 const MAX_SIMULATED_BLOCKS = Number(process.env.MINEDIT_AGENT_MAX_SIM_BLOCKS || 220000);
 const AGENT_JOBS = new Map();
 let nextAgentJobId = 1;
+
+const CURSOR_STEP_PHASES = [
+  {
+    phase: "foundation",
+    instructions: "Place only the foundation, floor plate, structural footprint, terrain/base, and major support markers. Reserve entrances, paths, and vertical access space.",
+  },
+  {
+    phase: "walls_openings",
+    instructions: "Add walls, frames, columns, doors, gates, windows, arches, and readable entrance/opening detail without rebuilding the foundation.",
+  },
+  {
+    phase: "roof_access",
+    instructions: "Add roofs, ceilings, upper floors, ladders or stairs, railings, balconies, and usable vertical access without blocking paths or windows.",
+  },
+  {
+    phase: "lighting_furniture",
+    instructions: "Add interior lighting, furniture, storage, work areas, beds, shelves, rugs, room purpose, and upper-floor details while preserving movement paths.",
+  },
+  {
+    phase: "exterior_detail",
+    instructions: "Add exterior trim, paths, fences, plants on valid support, signs, lamps, gardens, contained fluids, and landscaping inside the footprint.",
+  },
+  {
+    phase: "correction",
+    instructions: "Patch only issues visible in the cumulative build: gaps, blocked doors, bad stair orientation, unsupported blocks, sparse areas, missing lights, or prompt mismatches.",
+  },
+];
 
 class BridgeError extends Error {
   constructor(status, message, details = null) {
@@ -1626,6 +1655,450 @@ async function completeWithCodex({ prompt, model, effort }) {
   });
 }
 
+function runCursorCommand(args, timeoutMs = CURSOR_TIMEOUT_MS, job = null) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+    const proc = spawn(CURSOR_BIN, args, {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+    const kill = () => {
+      if (!proc.killed) {
+        proc.kill("SIGTERM");
+      }
+    };
+    if (job) {
+      job.cancel = kill;
+    }
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      kill();
+      rejectOnce(new BridgeError(504, `Cursor CLI timed out after ${Math.round(timeoutMs / 1000)}s.`));
+    }, timeoutMs);
+
+    function rejectOnce(error) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      if (job && job.cancel === kill) {
+        job.cancel = null;
+      }
+      reject(error);
+    }
+
+    function resolveOnce(result) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      if (job && job.cancel === kill) {
+        job.cancel = null;
+      }
+      resolve(result);
+    }
+
+    proc.once("error", (error) => {
+      rejectOnce(new BridgeError(502, `Could not start Cursor CLI with '${CURSOR_BIN}': ${error.message}`));
+    });
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr = (stderr + chunk.toString()).slice(-12000);
+    });
+    proc.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolveOnce({ stdout, stderr });
+        return;
+      }
+      const reason = signal ? `signal ${signal}` : `exit code ${code}`;
+      rejectOnce(new BridgeError(502, `Cursor CLI failed with ${reason}. ${stderr}`.trim()));
+    });
+  });
+}
+
+async function cursorStatusPayload() {
+  const result = await runCursorCommand(["status"], RPC_TIMEOUT_MS);
+  const statusText = result.stdout.trim() || result.stderr.trim();
+  return {
+    ok: true,
+    provider: "cursor-cli",
+    binary: CURSOR_BIN,
+    authenticated: !/not authenticated|not logged in/i.test(statusText),
+    status: statusText,
+  };
+}
+
+async function cursorModelsPayload() {
+  const models = await listCursorModels();
+  return {
+    ok: true,
+    provider: "cursor-cli",
+    binary: CURSOR_BIN,
+    models,
+  };
+}
+
+async function listCursorModels() {
+  const result = await runCursorCommand(["models"], RPC_TIMEOUT_MS);
+  const models = parseCursorModels(result.stdout);
+  if (models.length === 0) {
+    throw new BridgeError(502, `Cursor CLI returned no models. ${result.stderr}`.trim());
+  }
+  return models;
+}
+
+function parseCursorModels(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("Available models") && !line.startsWith("Tip:"))
+    .map((line) => {
+      const separator = line.indexOf(" - ");
+      if (separator < 0) {
+        return { id: line, displayName: line };
+      }
+      return {
+        id: line.slice(0, separator).trim(),
+        displayName: line.slice(separator + 3).trim(),
+      };
+    })
+    .filter((model) => model.id);
+}
+
+async function completeWithCursor({ prompt, model, effort }) {
+  validateCursorPromptBody({ prompt, model, effort });
+  const models = await listCursorModels();
+  const modelToUse = selectCursorModel(models, model, effort);
+  const text = await runCursorPrompt(prompt, modelToUse, "ask");
+  return {
+    ok: true,
+    provider: "cursor-cli",
+    model: modelToUse,
+    effort,
+    text,
+  };
+}
+
+function validateCursorPromptBody({ prompt, model, effort }) {
+  if (!prompt || typeof prompt !== "string") {
+    throw new BridgeError(400, "Missing string field: prompt");
+  }
+  if (!model || typeof model !== "string") {
+    throw new BridgeError(400, "Missing string field: model");
+  }
+  if (!effort || typeof effort !== "string") {
+    throw new BridgeError(400, "Missing string field: effort");
+  }
+}
+
+function validateCursorAgentBody(body) {
+  const prompt = body?.prompt;
+  const model = body?.model;
+  const effort = body?.effort;
+  const width = Number(body?.width);
+  const depth = Number(body?.depth);
+  validateCursorPromptBody({ prompt, model, effort });
+  if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(depth) || depth <= 0) {
+    throw new BridgeError(400, "Missing valid integer fields: width and depth");
+  }
+  return { prompt, model, effort, width, depth };
+}
+
+function selectCursorModel(models, requested, effort) {
+  const ids = new Set(models.map((entry) => entry.id));
+  const displayLookup = new Map(models.map((entry) => [entry.displayName, entry.id]));
+  const raw = String(requested || "").trim();
+  if (!raw || raw === "auto") {
+    return "auto";
+  }
+  if (ids.has(raw)) {
+    return raw;
+  }
+  if (displayLookup.has(raw)) {
+    return displayLookup.get(raw);
+  }
+
+  const stripped = raw.startsWith("openai/") ? raw.slice("openai/".length) : raw;
+  if (ids.has(stripped)) {
+    return stripped;
+  }
+  if (displayLookup.has(stripped)) {
+    return displayLookup.get(stripped);
+  }
+
+  const suffix = cursorEffortSuffix(effort);
+  const candidates = [];
+  if (/^gpt-\d+(?:\.\d+)?$/.test(stripped)) {
+    candidates.push(`${stripped}-${suffix}`);
+    if (suffix === "xhigh") {
+      candidates.push(`${stripped}-extra-high`);
+    }
+    if (suffix === "medium") {
+      candidates.push(stripped);
+    }
+    candidates.push(`${stripped}-medium`, `${stripped}-high`, `${stripped}-low`);
+  }
+  for (const candidate of candidates) {
+    if (ids.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  if (raw.startsWith("openai/")) {
+    return "auto";
+  }
+
+  const examples = models.slice(0, 12).map((entry) => entry.id).join(", ");
+  throw new BridgeError(400, `Cursor model '${raw}' was not found. Use /model list cursor. Available examples: ${examples || "none returned"}`);
+}
+
+function cursorEffortSuffix(effort) {
+  return switchEffort(String(effort || "").trim().toLowerCase());
+}
+
+function switchEffort(effort) {
+  if (effort === "none") {
+    return "none";
+  }
+  if (effort === "minimal" || effort === "low") {
+    return "low";
+  }
+  if (effort === "high") {
+    return "high";
+  }
+  if (effort === "xhigh") {
+    return "xhigh";
+  }
+  if (effort === "max") {
+    return "max";
+  }
+  return "medium";
+}
+
+async function runCursorPrompt(prompt, model, mode = "ask", job = null) {
+  const args = [
+    "-p",
+    "--output-format",
+    "json",
+    "--trust",
+    "--workspace",
+    process.cwd(),
+  ];
+  if (mode) {
+    args.push("--mode", mode);
+  }
+  if (model) {
+    args.push("--model", model);
+  }
+  args.push(prompt);
+
+  const result = await runCursorCommand(args, CURSOR_TIMEOUT_MS, job);
+  const json = parseCursorResult(result.stdout);
+  const text = typeof json.result === "string" ? json.result.trim() : "";
+  if (!text) {
+    throw new BridgeError(502, "Cursor CLI completed but returned no result text.");
+  }
+  return text;
+}
+
+function parseCursorResult(stdout) {
+  const lines = String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const json = JSON.parse(lines[i]);
+      if (json?.type === "result" || typeof json?.result === "string") {
+        return json;
+      }
+    } catch {
+      // Keep scanning in case Cursor printed non-JSON status before the result.
+    }
+  }
+  throw new BridgeError(502, `Cursor CLI did not return JSON output: ${String(stdout || "").slice(0, 1000)}`);
+}
+
+function startCursorAgentBuild(body) {
+  const job = createAgentJob();
+  agentEvent(job, "Minedit Cursor agent: job accepted by local bridge.");
+  runCursorAgentBuildJob(job, body).catch((error) => {
+    if (job.status === "cancelled") {
+      return;
+    }
+    job.status = "failed";
+    job.error = error.message || "Cursor agent build failed.";
+    job.finishedAt = Date.now();
+    agentEvent(job, `Minedit Cursor agent failed: ${job.error}`);
+  });
+  return { ok: true, jobId: job.id };
+}
+
+function startCursorAgentStepByStepBuild(body) {
+  const job = createAgentJob();
+  agentEvent(job, "Minedit Cursor tool agent: job accepted by local bridge.");
+  runCursorAgentStepByStepBuildJob(job, body).catch((error) => {
+    if (job.status === "cancelled") {
+      return;
+    }
+    job.status = "failed";
+    job.error = error.message || "Cursor step-by-step agent build failed.";
+    job.finishedAt = Date.now();
+    agentEvent(job, `Minedit Cursor tool agent failed: ${job.error}`);
+  });
+  return { ok: true, jobId: job.id };
+}
+
+async function runCursorAgentBuildJob(job, body) {
+  const { prompt, model, effort, width, depth } = validateCursorAgentBody(body);
+  await fs.mkdir(PREVIEW_DIR, { recursive: true });
+  assertAgentRunning(job);
+  agentEvent(job, "Minedit Cursor agent: checking Cursor CLI models...");
+  const models = await listCursorModels();
+  const modelToUse = selectCursorModel(models, model, effort);
+
+  assertAgentRunning(job);
+  agentEvent(job, `Minedit Cursor agent: generating initial draft with ${modelToUse}...`);
+  let text = await runCursorPrompt(agentInitialPrompt(prompt), modelToUse, "ask", job);
+  let code = extractCodeFromText(text);
+  let simulation = simulateBuildCode(code, width, depth);
+  agentEvent(job, `Minedit Cursor agent: draft generated, ${simulation.stats.operationCount} operations, ${simulation.stats.nonAirBlocks} preview blocks.`);
+
+  let revision = 1;
+  while (revision <= AGENT_MAX_REVISIONS) {
+    assertAgentRunning(job);
+    const preview = await renderPreviewPng(simulation, width, depth, `${job.id}-cursor-preview-${revision}.png`);
+    const report = validationReport(simulation);
+    agentEvent(job, `Minedit Cursor agent: rendered preview ${revision}: ${path.basename(preview.path)}.`);
+    if (simulation.issues.length > 0) {
+      agentEvent(job, `Minedit Cursor agent: validator notes: ${compactIssueSummary(simulation.issues)}.`);
+    } else {
+      agentEvent(job, "Minedit Cursor agent: validator did not find obvious block-physics issues.");
+    }
+
+    const revisionPrompt = `${agentRevisionPrompt(prompt, code, report, revision)}
+
+Preview image path for Cursor to inspect if useful:
+${preview.path}`;
+    agentEvent(job, `Minedit Cursor agent: asking Cursor to review preview ${revision}...`);
+    text = await runCursorPrompt(revisionPrompt, modelToUse, "ask", job);
+    code = extractCodeFromText(text);
+    simulation = simulateBuildCode(code, width, depth);
+    agentEvent(job, `Minedit Cursor agent: revision ${revision} returned, ${simulation.stats.operationCount} operations, ${simulation.stats.nonAirBlocks} preview blocks.`);
+
+    if (!hasSevereIssues(simulation)) {
+      break;
+    }
+    revision++;
+  }
+
+  assertAgentRunning(job);
+  const finalPreview = await renderPreviewPng(simulation, width, depth, `${job.id}-cursor-final.png`);
+  job.text = code;
+  job.summary = `Minedit Cursor agent: final preview ${path.basename(finalPreview.path)}, ${simulation.stats.nonAirBlocks} preview blocks, ${simulation.issues.length} validation notes.`;
+  job.status = "completed";
+  job.finishedAt = Date.now();
+  agentEvent(job, job.summary);
+  job.cancel = null;
+}
+
+async function runCursorAgentStepByStepBuildJob(job, body) {
+  const { prompt, model, effort, width, depth } = validateCursorAgentBody(body);
+  await fs.mkdir(PREVIEW_DIR, { recursive: true });
+  assertAgentRunning(job);
+  agentEvent(job, "Minedit Cursor tool agent: checking Cursor CLI models...");
+  const models = await listCursorModels();
+  const modelToUse = selectCursorModel(models, model, effort);
+
+  let simulation = emptySimulation();
+  const codeSteps = [];
+  let previousPreviewPath = "";
+  for (let i = 0; i < CURSOR_STEP_PHASES.length; i++) {
+    assertAgentRunning(job);
+    const phase = CURSOR_STEP_PHASES[i];
+    const report = validationReport(simulation);
+    const stepPrompt = cursorStepPrompt(
+      prompt,
+      width,
+      depth,
+      phase,
+      i + 1,
+      CURSOR_STEP_PHASES.length,
+      codeSteps.join("\n\n"),
+      report,
+      previousPreviewPath,
+    );
+    agentEvent(job, `Minedit Cursor tool agent: generating step ${i + 1}/${CURSOR_STEP_PHASES.length} (${phase.phase}) with ${modelToUse}...`);
+    const text = await runCursorPrompt(stepPrompt, modelToUse, "ask", job);
+    const code = extractCodeFromText(text);
+    simulation = simulateBuildCode(code, width, depth, simulation.grid);
+    const summary = `step ${i + 1} (${phase.phase}): ${simulation.stats.apiCallCount} api calls, ${simulation.stats.operationCount} block writes, ${simulation.stats.nonAirBlocks} cumulative preview blocks`;
+    codeSteps.push(`// step ${i + 1}: ${phase.phase}\n${code}`);
+    agentBatch(job, code, simulation, summary);
+    agentEvent(job, `Minedit Cursor tool agent: queued ${summary}.`);
+
+    const preview = await renderPreviewPng(simulation, width, depth, `${job.id}-cursor-tool-${i + 1}.png`);
+    previousPreviewPath = preview.path;
+    if (simulation.issues.length > 0) {
+      agentEvent(job, `Minedit Cursor tool agent: validator notes: ${compactIssueSummary(simulation.issues)}.`);
+    } else {
+      agentEvent(job, "Minedit Cursor tool agent: validator did not find obvious block-physics issues.");
+    }
+  }
+
+  assertAgentRunning(job);
+  job.text = codeSteps.join("\n\n");
+  job.summary = `Minedit Cursor tool agent: finished after ${codeSteps.length} placement steps, ${simulation.stats.nonAirBlocks} preview blocks, ${simulation.issues.length} validation notes.`;
+  job.status = "completed";
+  job.finishedAt = Date.now();
+  agentEvent(job, job.summary);
+  job.cancel = null;
+}
+
+function cursorStepPrompt(originalPrompt, width, depth, phase, stepNumber, stepCount, previousCode, report, previousPreviewPath) {
+  const previous = previousCode.trim() || "No previous steps yet.";
+  const preview = previousPreviewPath
+    ? `Previous cumulative preview image path for Cursor to inspect if useful:\n${previousPreviewPath}`
+    : "No previous preview image yet.";
+  return `${originalPrompt}
+
+Cursor step-by-step Minedit agent mode:
+- The selected footprint is ${width} x ${depth}. Coordinates are relative to the selected footprint; y=0 is the selected base height.
+- Generate only step ${stepNumber} of ${stepCount}: ${phase.phase}.
+- Step instructions: ${phase.instructions}
+- Return one Rhino-compatible JavaScript function build(api) containing only incremental placements or targeted corrections for this step.
+- Do not recreate previous steps unless this phase is intentionally correcting a small part.
+- Avoid api.replaceLine and api.clearLine; this is build mode on a blank footprint.
+- Stay inside x/z bounds. Use ES5 JavaScript only.
+- Return raw code only, no markdown and no prose.
+
+Previous step code context:
+${truncateText(previous, 12000)}
+
+Current cumulative validation report:
+${report}
+
+${preview}`;
+}
+
+function truncateText(text, maxChars) {
+  const value = String(text || "");
+  if (value.length <= maxChars) {
+    return value;
+  }
+  const head = Math.max(0, Math.floor(maxChars / 2));
+  const tail = Math.max(0, maxChars - head - 80);
+  return `${value.slice(0, head)}
+/* ... previous step code truncated for prompt size ... */
+${value.slice(value.length - tail)}`;
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -1666,9 +2139,22 @@ async function handle(req, res) {
     sendJson(res, 200, await statusPayload());
     return;
   }
+  if (req.method === "GET" && url.pathname === "/cursor/status") {
+    sendJson(res, 200, await cursorStatusPayload());
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/cursor/models") {
+    sendJson(res, 200, await cursorModelsPayload());
+    return;
+  }
   if (req.method === "POST" && url.pathname === "/complete") {
     const body = await readJsonBody(req);
     sendJson(res, 200, await completeWithCodex(body));
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/cursor/complete") {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, await completeWithCursor(body));
     return;
   }
   if (req.method === "POST" && url.pathname === "/agent-build/start") {
@@ -1676,12 +2162,27 @@ async function handle(req, res) {
     sendJson(res, 200, startAgentBuild(body));
     return;
   }
+  if (req.method === "POST" && url.pathname === "/cursor/agent-build/start") {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, startCursorAgentBuild(body));
+    return;
+  }
   if (req.method === "POST" && url.pathname === "/agent-build/step-by-step/start") {
     const body = await readJsonBody(req);
     sendJson(res, 200, startAgentStepByStepBuild(body));
     return;
   }
+  if (req.method === "POST" && url.pathname === "/cursor/agent-build/step-by-step/start") {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, startCursorAgentStepByStepBuild(body));
+    return;
+  }
   if (req.method === "POST" && url.pathname === "/agent-build/cancel") {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, cancelAgentJob(String(body?.jobId || "")));
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/cursor/agent-build/cancel") {
     const body = await readJsonBody(req);
     sendJson(res, 200, cancelAgentJob(String(body?.jobId || "")));
     return;
@@ -1701,7 +2202,22 @@ async function handle(req, res) {
     ));
     return;
   }
-  sendJson(res, 404, { ok: false, error: "Not found. Use GET /status, POST /complete, POST /agent-build/start, POST /agent-build/step-by-step/start, POST /agent-build/cancel, or GET /agent-build/status." });
+  if (req.method === "GET" && url.pathname === "/cursor/agent-build/status") {
+    const jobId = url.searchParams.get("id") || "";
+    const afterSeq = Number(url.searchParams.get("after") || 0);
+    const afterBatch = Number(url.searchParams.get("afterBatch") || 0);
+    const job = AGENT_JOBS.get(jobId);
+    if (!job) {
+      throw new BridgeError(404, "Unknown Minedit agent job id.");
+    }
+    sendJson(res, 200, agentStatusPayload(
+      job,
+      Number.isFinite(afterSeq) ? afterSeq : 0,
+      Number.isFinite(afterBatch) ? afterBatch : 0,
+    ));
+    return;
+  }
+  sendJson(res, 404, { ok: false, error: "Not found. Use GET /status, GET /cursor/status, GET /cursor/models, POST /complete, POST /cursor/complete, POST /agent-build/start, POST /cursor/agent-build/start, POST /agent-build/step-by-step/start, POST /cursor/agent-build/step-by-step/start, POST /agent-build/cancel, POST /cursor/agent-build/cancel, GET /agent-build/status, or GET /cursor/agent-build/status." });
 }
 
 const server = http.createServer((req, res) => {

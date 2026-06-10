@@ -7,7 +7,8 @@ import java.util.stream.Collectors;
 
 public enum AiProvider {
     OPENROUTER("openrouter", "OpenRouter"),
-    CODEX_LOCAL("codex-local", "Codex local bridge");
+    CODEX_LOCAL("codex-local", "Codex local bridge"),
+    CURSOR("cursor", "Cursor local bridge");
 
     private final String id;
     private final String displayName;

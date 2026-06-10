@@ -7,6 +7,7 @@ import com.angel.aibuilder.build.BuildQueue;
 import com.angel.aibuilder.build.BuildUndoManager;
 import com.angel.aibuilder.codex.CodexLocalClient;
 import com.angel.aibuilder.config.AiBuilderSettings;
+import com.angel.aibuilder.cursor.CursorLocalClient;
 import com.angel.aibuilder.debug.BuildDebugFiles;
 import com.angel.aibuilder.openrouter.OpenRouterClient;
 import com.angel.aibuilder.selection.BuildSelection;
@@ -23,6 +24,7 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -32,6 +34,7 @@ public class AiBuilderCommands {
     private static final Set<String> ENABLED_VALUES = Set.of("enabled", "enable", "on", "true", "yes");
     private static final Set<String> DISABLED_VALUES = Set.of("disabled", "disable", "off", "false", "no");
     private static final CodexLocalClient CODEX_CLIENT = new CodexLocalClient();
+    private static final CursorLocalClient CURSOR_CLIENT = new CursorLocalClient();
     private static final OpenRouterClient OPENROUTER_CLIENT = new OpenRouterClient();
 
     @SubscribeEvent
@@ -61,6 +64,8 @@ public class AiBuilderCommands {
                                 AiBuilderSettings.setProvider(provider.id());
                                 if (provider == AiProvider.CODEX_LOCAL) {
                                     ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Codex local bridge. Start it with `npm --prefix bridge start`, then use /codex status.").withStyle(ChatFormatting.GREEN), false);
+                                } else if (provider == AiProvider.CURSOR) {
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to Cursor local bridge. Start it with `npm --prefix bridge start`, then use /model list cursor and /model auto or another Cursor model id.").withStyle(ChatFormatting.GREEN), false);
                                 } else {
                                     ctx.getSource().sendSuccess(() -> Component.literal("Minedit provider set to OpenRouter.").withStyle(ChatFormatting.GREEN), false);
                                 }
@@ -76,9 +81,9 @@ public class AiBuilderCommands {
                             try {
                                 String url = StringArgumentType.getString(ctx, "url");
                                 AiBuilderSettings.setCodexUrl(url);
-                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit Codex bridge URL set to " + url).withStyle(ChatFormatting.GREEN), false);
+                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit local bridge URL set to " + url).withStyle(ChatFormatting.GREEN), false);
                             } catch (IOException e) {
-                                ctx.getSource().sendFailure(Component.literal("Could not save Codex bridge URL: " + e.getMessage()));
+                                ctx.getSource().sendFailure(Component.literal("Could not save local bridge URL: " + e.getMessage()));
                             }
                             return 1;
                         })));
@@ -123,6 +128,12 @@ public class AiBuilderCommands {
                         })));
 
         event.getDispatcher().register(Commands.literal("model")
+                .then(Commands.literal("list")
+                        .then(Commands.argument("provider", StringArgumentType.word())
+                                .executes(ctx -> {
+                                    listModels(ctx.getSource(), StringArgumentType.getString(ctx, "provider"));
+                                    return 1;
+                                })))
                 .then(Commands.argument("model", StringArgumentType.greedyString())
                         .executes(ctx -> {
                             try {
@@ -275,8 +286,8 @@ public class AiBuilderCommands {
                                             if (options == null) {
                                                 return 0;
                                             }
-                                            if (options.provider() != AiProvider.CODEX_LOCAL) {
-                                                ctx.getSource().sendFailure(Component.literal("Minedit step-by-step agent build only works with Codex local. Use /provider codex-local and start the bridge with `npm --prefix bridge start`."));
+                                            if (!isLocalAgentProvider(options.provider())) {
+                                                ctx.getSource().sendFailure(Component.literal("Minedit step-by-step agent build only works with Codex local or Cursor. Use /provider codex-local or /provider cursor and start the bridge with `npm --prefix bridge start`."));
                                                 return 0;
                                             }
 
@@ -298,8 +309,8 @@ public class AiBuilderCommands {
                                     if (options == null) {
                                         return 0;
                                     }
-                                    if (options.provider() != AiProvider.CODEX_LOCAL) {
-                                        ctx.getSource().sendFailure(Component.literal("Minedit agent build only works with Codex local. Use /provider codex-local and start the bridge with `npm --prefix bridge start`."));
+                                    if (!isLocalAgentProvider(options.provider())) {
+                                        ctx.getSource().sendFailure(Component.literal("Minedit agent build only works with Codex local or Cursor. Use /provider codex-local or /provider cursor and start the bridge with `npm --prefix bridge start`."));
                                         return 0;
                                     }
 
@@ -439,16 +450,73 @@ public class AiBuilderCommands {
         String model = AiBuilderSettings.model();
         String effort = quick ? AiBuilderSettings.quickEffort() : AiBuilderSettings.effort();
         boolean streaming = AiBuilderSettings.streaming();
-        if (provider == AiProvider.CODEX_LOCAL) {
+        if (provider == AiProvider.CODEX_LOCAL || provider == AiProvider.CURSOR) {
             return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort, streaming);
         }
 
         String apiKey = AiBuilderSettings.apiKey();
         if (apiKey.isEmpty()) {
-            source.sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>, or use /provider codex-local."));
+            source.sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>, or use /provider codex-local or /provider cursor."));
             return null;
         }
         return new AiRequestOptions(provider, apiKey, "", model, effort, streaming);
+    }
+
+    private static boolean isLocalAgentProvider(AiProvider provider) {
+        return provider == AiProvider.CODEX_LOCAL || provider == AiProvider.CURSOR;
+    }
+
+    private static void listModels(CommandSourceStack source, String providerId) {
+        AiProvider provider = AiProvider.fromId(providerId).orElse(null);
+        if (provider == null) {
+            source.sendFailure(Component.literal("Provider must be one of: " + AiProvider.ids() + "."));
+            return;
+        }
+        if (provider != AiProvider.CURSOR) {
+            source.sendFailure(Component.literal("/model list currently only supports cursor."));
+            return;
+        }
+
+        MinecraftServer server = source.getServer();
+        String url = AiBuilderSettings.codexUrl();
+        source.sendSuccess(() -> Component.literal("Minedit: checking Cursor models through local bridge at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return CURSOR_CLIENT.listModels(url);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).thenAccept(models -> server.execute(() -> sendCursorModelList(source, models)))
+                .exceptionally(error -> {
+                    server.execute(() -> source.sendFailure(Component.literal("Cursor model list failed: " + rootMessage(error))));
+                    return null;
+                });
+    }
+
+    private static void sendCursorModelList(CommandSourceStack source, List<CursorLocalClient.Model> models) {
+        if (models.isEmpty()) {
+            source.sendFailure(Component.literal("Cursor returned no models."));
+            return;
+        }
+
+        source.sendSuccess(() -> Component.literal("Cursor models (" + models.size() + " ids):").withStyle(ChatFormatting.GOLD), false);
+        StringBuilder chunk = new StringBuilder();
+        for (CursorLocalClient.Model model : models) {
+            String next = model.id();
+            if (!chunk.isEmpty() && chunk.length() + next.length() + 2 > 230) {
+                String text = chunk.toString();
+                source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GRAY), false);
+                chunk.setLength(0);
+            }
+            if (!chunk.isEmpty()) {
+                chunk.append(", ");
+            }
+            chunk.append(next);
+        }
+        if (!chunk.isEmpty()) {
+            String text = chunk.toString();
+            source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GRAY), false);
+        }
     }
 
     private static void sendStatus(CommandSourceStack source) {
@@ -467,7 +535,7 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Quick edit effort: " + quickEffort).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter streaming: " + (streaming ? "enabled" : "disabled")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
-        source.sendSuccess(() -> Component.literal("Codex bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Local bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("AI generations in progress: " + BuildJobService.activeGenerationCount()).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Queued block placement jobs: " + BuildQueue.size()).withStyle(ChatFormatting.GRAY), false);
 

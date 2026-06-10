@@ -6,6 +6,7 @@ import com.angel.aibuilder.ai.CancellationToken;
 import com.angel.aibuilder.ai.AiProvider;
 import com.angel.aibuilder.ai.AiRequestOptions;
 import com.angel.aibuilder.codex.CodexLocalClient;
+import com.angel.aibuilder.cursor.CursorLocalClient;
 import com.angel.aibuilder.debug.BuildDebugFiles;
 import com.angel.aibuilder.js.JsBuildRunner;
 import com.angel.aibuilder.openrouter.OpenRouterClient;
@@ -34,6 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class BuildJobService {
     private static final OpenRouterClient OPENROUTER_CLIENT = new OpenRouterClient();
     private static final CodexLocalClient CODEX_CLIENT = new CodexLocalClient();
+    private static final CursorLocalClient CURSOR_CLIENT = new CursorLocalClient();
     private static final BlockSpec AIR = new BlockSpec("minecraft:air", Map.of());
     private static final Map<UUID, List<ActiveGeneration>> ACTIVE_GENERATIONS = new ConcurrentHashMap<>();
     private static final List<BuildStage> BUILD_STAGES = List.of(
@@ -293,10 +295,8 @@ public final class BuildJobService {
             try {
                 generation.token().throwIfCancelled();
                 prompt = PromptFactory.create(selection, userPrompt);
-                completion = CODEX_CLIENT.agentBuild(
-                        options.codexUrl(),
-                        options.model(),
-                        options.effort(),
+                completion = agentBuildCompletion(
+                        options,
                         prompt,
                         selection.width(),
                         selection.depth(),
@@ -360,10 +360,8 @@ public final class BuildJobService {
             try {
                 generation.token().throwIfCancelled();
                 prompt = PromptFactory.create(selection, userPrompt);
-                completion = CODEX_CLIENT.agentStepByStepBuild(
-                        options.codexUrl(),
-                        options.model(),
-                        options.effort(),
+                completion = agentStepByStepCompletion(
+                        options,
                         prompt,
                         selection.width(),
                         selection.depth(),
@@ -590,7 +588,32 @@ public final class BuildJobService {
         if (options.provider() == AiProvider.CODEX_LOCAL) {
             return CODEX_CLIENT.complete(options.codexUrl(), options.model(), options.effort(), prompt, token);
         }
+        if (options.provider() == AiProvider.CURSOR) {
+            return CURSOR_CLIENT.complete(options.codexUrl(), options.model(), options.effort(), prompt, token);
+        }
         return OPENROUTER_CLIENT.complete(options.openRouterApiKey(), options.model(), options.effort(), prompt, options.streaming(), token, progress);
+    }
+
+    private static AiCompletion agentBuildCompletion(AiRequestOptions options, String prompt, int width, int depth, CancellationToken token, java.util.function.Consumer<String> progress) throws Exception {
+        if (options.provider() == AiProvider.CODEX_LOCAL) {
+            return CODEX_CLIENT.agentBuild(options.codexUrl(), options.model(), options.effort(), prompt, width, depth, token, progress);
+        }
+        if (options.provider() == AiProvider.CURSOR) {
+            return CURSOR_CLIENT.agentBuild(options.codexUrl(), options.model(), options.effort(), prompt, width, depth, token, progress);
+        }
+        throw new IOException("Agent build only works with a local agent provider.");
+    }
+
+    private static AiCompletion agentStepByStepCompletion(AiRequestOptions options, String prompt, int width, int depth, CancellationToken token, java.util.function.Consumer<String> progress, java.util.function.Consumer<AgentStepBatch> batchConsumer) throws Exception {
+        if (options.provider() == AiProvider.CODEX_LOCAL) {
+            return CODEX_CLIENT.agentStepByStepBuild(options.codexUrl(), options.model(), options.effort(), prompt, width, depth, token, progress, batch ->
+                    batchConsumer.accept(new AgentStepBatch(batch.id(), batch.code(), batch.operationCount(), batch.nonAirBlocks(), batch.summary())));
+        }
+        if (options.provider() == AiProvider.CURSOR) {
+            return CURSOR_CLIENT.agentStepByStepBuild(options.codexUrl(), options.model(), options.effort(), prompt, width, depth, token, progress, batch ->
+                    batchConsumer.accept(new AgentStepBatch(batch.id(), batch.code(), batch.operationCount(), batch.nonAirBlocks(), batch.summary())));
+        }
+        throw new IOException("Step-by-step agent build only works with a local agent provider.");
     }
 
     private static Exception stoppedException(ActiveGeneration generation, Exception error) {
@@ -639,6 +662,9 @@ public final class BuildJobService {
     }
 
     private record StageArtifact(String name, String code) {
+    }
+
+    private record AgentStepBatch(int id, String code, int operationCount, int nonAirBlocks, String summary) {
     }
 
     private record ActiveGeneration(UUID playerId, CancellationToken token) {

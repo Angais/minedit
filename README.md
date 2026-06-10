@@ -1,14 +1,14 @@
 # Minedit
 
-Minedit is an experimental NeoForge mod for building and editing Minecraft structures with AI models through OpenRouter or a local Codex bridge.
+Minedit is an experimental NeoForge mod for building and editing Minecraft structures with AI models through OpenRouter or a local bridge for Codex or Cursor.
 
-Select a footprint with a stick, describe what you want, and Minedit asks a model to generate compact builder code that places blocks in the selected area. It can also edit existing builds with compact line-aware patches, generate builds in focused stages, and run a Codex-powered agent mode.
+Select a footprint with a stick, describe what you want, and Minedit asks a model to generate compact builder code that places blocks in the selected area. It can also edit existing builds with compact line-aware patches, generate builds in focused stages, and run local bridge agent modes.
 
 ## Status and Risk
 
 Minedit is a work in progress. Expect things to break.
 
-This mod sends prompts to the provider you configure. OpenRouter requests use the API key you configure. Codex local bridge requests use your local Codex/OpenAI login and may consume Codex, ChatGPT, or OpenAI plan limits. Depending on your provider, model, account, and usage, requests may cost money or consume plan limits. You are responsible for all usage and charges caused by your configured provider. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, broken saves, or other side effects.
+This mod sends prompts to the provider you configure. OpenRouter requests use the API key you configure. Codex local bridge requests use your local Codex/OpenAI login and may consume Codex, ChatGPT, or OpenAI plan limits. Cursor local bridge requests use your local Cursor login or API key and may consume Cursor plan limits. Depending on your provider, model, account, and usage, requests may cost money or consume plan limits. You are responsible for all usage and charges caused by your configured provider. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, broken saves, or other side effects.
 
 Your OpenRouter API key is stored in plaintext in your Minecraft game directory at `config/minedit.properties`. It is not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it.
 
@@ -21,6 +21,7 @@ Back up worlds before testing large builds, staged builds, agent builds, or edit
 - Java 25 for development/building
 - OpenRouter API key for OpenRouter mode
 - Node.js 18+ and the Codex CLI for local Codex bridge mode
+- Cursor CLI for local Cursor bridge mode
 
 ## Installation
 
@@ -88,19 +89,21 @@ The staged builder currently runs these stages:
 
 Each stage receives the previous stage code as context and should only output incremental work for the current stage. This usually costs more than `/build`, but it gives the model more focus per phase.
 
-### Codex Agent Build
+### Local Agent Build
 
-Codex agent modes only work with the local Codex bridge:
+Agent modes work with the local bridge through Codex or Cursor:
 
 ```mcfunction
 /provider codex-local
+# or
+/provider cursor
 /build agent <prompt>
 /build agent step-by-step <prompt>
 ```
 
-`/build agent <prompt>` asks Codex to draft, preview, and revise before Minecraft places the final build.
+`/build agent <prompt>` asks the local agent provider to draft, preview, and revise before Minecraft places the final build.
 
-`/build agent step-by-step <prompt>` starts one Codex App Server agent turn with Minedit dynamic tools. Codex can call tools such as `place_step`, `render_preview`, `inspect_status`, and `finish_build` while it works. Minecraft applies placement steps as Codex emits them.
+`/build agent step-by-step <prompt>` places the build in multiple visible steps. Codex uses Minedit dynamic tools such as `place_step`, `render_preview`, `inspect_status`, and `finish_build`. Cursor uses the bridge's phased step generator and emits placement batches as each phase completes.
 
 ## Editing
 
@@ -124,20 +127,22 @@ Set quick edit reasoning effort:
 /edit set quickeffort low
 ```
 
-## Local Codex Bridge
+## Local Bridge
 
-The local Codex bridge lets Minecraft talk to `codex app-server` through a localhost HTTP server.
+The local bridge lets Minecraft talk to `codex app-server` or Cursor CLI through a localhost HTTP server.
 
 Requirements:
 
 - Node.js 18+
-- Codex CLI installed and logged in
+- Codex CLI installed and logged in for `/provider codex-local`
+- Cursor CLI installed and logged in for `/provider cursor`
 - This repository or source zip available locally, because the bridge code lives in `bridge/`
 
 Log in once if needed:
 
 ```sh
 codex login
+agent login
 ```
 
 Start the bridge from the repository:
@@ -163,14 +168,27 @@ Then in Minecraft:
 
 Codex model ids usually do not use the OpenRouter `openai/` prefix. The bridge strips `openai/` automatically, so `openai/gpt-5.5` becomes `gpt-5.5`, but setting `/model gpt-5.5` is clearer when using Codex.
 
+For Cursor:
+
+```mcfunction
+/provider cursor
+/codexurl http://127.0.0.1:8765
+/model list cursor
+/model auto
+```
+
+Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor model ids are the ids returned by `/model list cursor`, such as `auto` or account-specific ids like `gpt-5.5-medium`.
+
 ## Settings Commands
 
 ```mcfunction
 /provider openrouter
 /provider codex-local
+/provider cursor
 /apikey <openrouter-key>
 /codexurl http://127.0.0.1:8765
 /codex status
+/model list cursor
 /model <model-id>
 /build export <prompt>
 /build import
@@ -200,11 +218,11 @@ OpenRouter streaming: enabled
 
 `/streaming enabled` streams OpenRouter responses and shows progress/reasoning summaries when the provider sends them. `/streaming disabled` waits for the full response before showing usage and queueing placement.
 
-`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex agent jobs are also cancelled through the local bridge when possible.
+`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are also cancelled through the local bridge when possible.
 
 `/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, streaming setting, key/bridge configuration, current selection, active AI generations, and queued block placement jobs.
 
-Settings are saved in `config/minedit.properties`. The OpenRouter API key in that file is plaintext and belongs to the whole Minecraft game directory/profile, not a single world. The Codex bridge URL and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
+Settings are saved in `config/minedit.properties`. The OpenRouter API key in that file is plaintext and belongs to the whole Minecraft game directory/profile, not a single world. The local bridge URL and provider selection are also stored there. If you used an older build, Minedit will try to read the legacy `config/aibuilder.properties` file.
 
 ## Manual Export and Import
 
@@ -321,6 +339,7 @@ Model output is still imperfect. Use `/reset build` and world backups while test
 - Bundles Mozilla Rhino `1.8.0` as the JavaScript runtime through NeoForge Jar-in-Jar. Rhino is licensed under the Mozilla Public License 2.0: https://www.mozilla.org/MPL/2.0/
 - Uses OpenRouter's OpenAI-compatible chat completions API.
 - Optionally uses the OpenAI Codex app-server through the local `bridge/` helper.
+- Optionally uses Cursor CLI through the local `bridge/` helper.
 
 ## License
 
