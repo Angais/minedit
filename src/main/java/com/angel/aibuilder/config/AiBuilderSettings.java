@@ -58,6 +58,11 @@ public final class AiBuilderSettings {
         return Boolean.parseBoolean(PROPERTIES.getProperty("streaming", "true").trim());
     }
 
+    public static synchronized int maxCompletionTokens() {
+        load();
+        return parseNonNegativeInt(PROPERTIES.getProperty("max_completion_tokens", "0"));
+    }
+
     public static synchronized void setApiKey(String key) throws IOException {
         load();
         PROPERTIES.setProperty("openrouter_api_key", key.trim());
@@ -104,6 +109,20 @@ public final class AiBuilderSettings {
         load();
         PROPERTIES.setProperty("streaming", Boolean.toString(streaming));
         save();
+    }
+
+    public static synchronized void setMaxCompletionTokens(int maxCompletionTokens) throws IOException {
+        load();
+        PROPERTIES.setProperty("max_completion_tokens", Integer.toString(Math.max(0, maxCompletionTokens)));
+        save();
+    }
+
+    private static int parseNonNegativeInt(String value) {
+        try {
+            return Math.max(0, Integer.parseInt(value.trim()));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private static void load() {

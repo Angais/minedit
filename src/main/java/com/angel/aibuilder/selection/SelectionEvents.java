@@ -19,13 +19,12 @@ public class SelectionEvents {
         } else {
             SelectionManager.SelectionClick click = SelectionManager.selectServer(event.getEntity().getUUID(), event.getPos());
             if (click.firstCorner()) {
-                event.getEntity().sendSystemMessage(Component.literal("Minedit: first corner selected.").withStyle(ChatFormatting.YELLOW));
+                event.getEntity().sendSystemMessage(Component.literal("Minedit: first corner selected at "
+                        + event.getPos().getX() + " " + event.getPos().getY() + " " + event.getPos().getZ() + ".").withStyle(ChatFormatting.YELLOW));
             } else {
                 BuildSelection selection = click.selection();
-                event.getEntity().sendSystemMessage(Component.literal(
-                        "Minedit: footprint selected: " + selection.width() + " x " + selection.depth()
-                                + " at Y " + selection.baseY() + "."
-                ).withStyle(ChatFormatting.GREEN));
+                event.getEntity().sendSystemMessage(Component.literal("Minedit: selection " + selection.shortSummary()
+                        + ". Reuse: " + selection.reuseCommand()).withStyle(ChatFormatting.GREEN));
             }
         }
     }

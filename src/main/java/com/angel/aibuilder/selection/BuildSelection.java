@@ -30,4 +30,18 @@ public record BuildSelection(BlockPos first, BlockPos second) {
     public int depth() {
         return maxZ() - minZ() + 1;
     }
+
+    public String coordinateArguments() {
+        return minX() + " " + baseY() + " " + minZ() + " " + maxX() + " " + baseY() + " " + maxZ();
+    }
+
+    public String reuseCommand() {
+        return "/selection set " + coordinateArguments();
+    }
+
+    public String shortSummary() {
+        return width() + " x " + depth()
+                + " at base Y " + baseY()
+                + "; coords " + coordinateArguments();
+    }
 }

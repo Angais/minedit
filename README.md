@@ -58,6 +58,8 @@ Select two X/Z footprint corners by right-clicking blocks with a stick, then run
 
 Minedit uses the selected X/Z area as the footprint. Height is not capped by the selection.
 
+When the second corner is selected, Minedit prints a short coordinate summary and a reusable `/selection set ...` command in chat. Save that command if you want to restore the same area later.
+
 ## Build Modes
 
 ### Normal Build
@@ -193,6 +195,8 @@ Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor 
 /openrouter provider auto
 /model list cursor
 /model <model-id>
+/maxtokens <tokens>
+/maxtokens default
 /build export <prompt>
 /build import
 /effort none
@@ -217,12 +221,15 @@ OpenRouter inference provider: automatic
 model: openai/gpt-5.5
 normal effort: medium
 quick edit effort: low
+max completion tokens: provider/model default
 OpenRouter streaming: enabled
 ```
 
 `/streaming enabled` streams OpenRouter responses and shows progress/reasoning summaries when the provider sends them. `/streaming disabled` waits for the full response before showing usage and queueing placement.
 
 `/provider openrouter` selects OpenRouter as Minedit's AI transport. OpenRouter may still route a model across several inference providers. Use `/openrouter provider list` to see the provider slugs available for the current model, `/openrouter provider <slug>` to lock requests to one provider with no fallback, and `/openrouter provider auto` to restore OpenRouter's automatic routing. The selected slug is saved in `config/minedit.properties`.
+
+`/maxtokens <tokens>` sets OpenRouter `max_completion_tokens`. `/maxtokens default` restores the current behavior, where Minedit omits the cap and lets the selected provider/model choose its default.
 
 `/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are also cancelled through the local bridge when possible.
 
@@ -278,6 +285,26 @@ Clear the current selection:
 
 ```mcfunction
 /reset selection
+```
+
+## Selection Commands
+
+Teleport to the active selection:
+
+```mcfunction
+/selection tp
+```
+
+Restore the previous selection:
+
+```mcfunction
+/selection restore
+```
+
+Recreate a saved selection from the coordinate summary printed in chat:
+
+```mcfunction
+/selection set <x1> <y1> <z1> <x2> <y2> <z2>
 ```
 
 ## Examples

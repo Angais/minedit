@@ -12,12 +12,15 @@ import com.angel.aibuilder.debug.BuildDebugFiles;
 import com.angel.aibuilder.openrouter.OpenRouterClient;
 import com.angel.aibuilder.selection.BuildSelection;
 import com.angel.aibuilder.selection.SelectionManager;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -184,6 +187,22 @@ public class AiBuilderCommands {
                             }
                             return 1;
                         })));
+
+        event.getDispatcher().register(Commands.literal("maxtokens")
+                .then(Commands.literal("default")
+                        .executes(ctx -> setMaxCompletionTokens(ctx.getSource(), 0)))
+                .then(Commands.literal("reset")
+                        .executes(ctx -> setMaxCompletionTokens(ctx.getSource(), 0)))
+                .then(Commands.argument("tokens", IntegerArgumentType.integer(1))
+                        .executes(ctx -> setMaxCompletionTokens(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "tokens")))));
+
+        event.getDispatcher().register(Commands.literal("maxcompletiontokens")
+                .then(Commands.literal("default")
+                        .executes(ctx -> setMaxCompletionTokens(ctx.getSource(), 0)))
+                .then(Commands.literal("reset")
+                        .executes(ctx -> setMaxCompletionTokens(ctx.getSource(), 0)))
+                .then(Commands.argument("tokens", IntegerArgumentType.integer(1))
+                        .executes(ctx -> setMaxCompletionTokens(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "tokens")))));
 
         event.getDispatcher().register(Commands.literal("stop")
                 .executes(ctx -> {
@@ -464,6 +483,52 @@ public class AiBuilderCommands {
                             ctx.getSource().sendSuccess(() -> Component.literal("Minedit: selection cleared.").withStyle(ChatFormatting.GREEN), false);
                             return 1;
                         })));
+
+        event.getDispatcher().register(Commands.literal("selection")
+                .then(Commands.literal("tp")
+                        .executes(ctx -> teleportToSelection(ctx.getSource())))
+                .then(Commands.literal("teleport")
+                        .executes(ctx -> teleportToSelection(ctx.getSource())))
+                .then(Commands.literal("restore")
+                        .executes(ctx -> {
+                            ServerPlayer player = ctx.getSource().getPlayerOrException();
+                            BuildSelection selection = SelectionManager.restoreServer(player.getUUID()).orElse(null);
+                            if (selection == null) {
+                                ctx.getSource().sendFailure(Component.literal("Minedit: no previous selection to restore."));
+                                return 0;
+                            }
+                            SelectionManager.setClient(player.getUUID(), selection);
+                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit: restored selection " + selection.shortSummary()
+                                    + ". Reuse: " + selection.reuseCommand()).withStyle(ChatFormatting.GREEN), false);
+                            return 1;
+                        }))
+                .then(Commands.literal("set")
+                        .then(Commands.argument("x1", IntegerArgumentType.integer())
+                                .then(Commands.argument("y1", IntegerArgumentType.integer())
+                                        .then(Commands.argument("z1", IntegerArgumentType.integer())
+                                                .then(Commands.argument("x2", IntegerArgumentType.integer())
+                                                        .then(Commands.argument("y2", IntegerArgumentType.integer())
+                                                                .then(Commands.argument("z2", IntegerArgumentType.integer())
+                                                                        .executes(ctx -> {
+                                                                            ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                                                            BuildSelection selection = new BuildSelection(
+                                                                                    new BlockPos(
+                                                                                            IntegerArgumentType.getInteger(ctx, "x1"),
+                                                                                            IntegerArgumentType.getInteger(ctx, "y1"),
+                                                                                            IntegerArgumentType.getInteger(ctx, "z1")
+                                                                                    ),
+                                                                                    new BlockPos(
+                                                                                            IntegerArgumentType.getInteger(ctx, "x2"),
+                                                                                            IntegerArgumentType.getInteger(ctx, "y2"),
+                                                                                            IntegerArgumentType.getInteger(ctx, "z2")
+                                                                                    )
+                                                                            );
+                                                                            SelectionManager.setServer(player.getUUID(), selection);
+                                                                            SelectionManager.setClient(player.getUUID(), selection);
+                                                                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit: selection set " + selection.shortSummary()
+                                                                                    + ". Reuse: " + selection.reuseCommand()).withStyle(ChatFormatting.GREEN), false);
+                                                                            return 1;
+                                                                        })))))))));
     }
 
     private static AiRequestOptions requestOptions(CommandSourceStack source, boolean quick) {
@@ -471,8 +536,9 @@ public class AiBuilderCommands {
         String model = AiBuilderSettings.model();
         String effort = quick ? AiBuilderSettings.quickEffort() : AiBuilderSettings.effort();
         boolean streaming = AiBuilderSettings.streaming();
+        int maxCompletionTokens = AiBuilderSettings.maxCompletionTokens();
         if (provider == AiProvider.CODEX_LOCAL || provider == AiProvider.CURSOR) {
-            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort, streaming, "");
+            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort, streaming, "", maxCompletionTokens);
         }
 
         String apiKey = AiBuilderSettings.apiKey();
@@ -480,7 +546,25 @@ public class AiBuilderCommands {
             source.sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>, or use /provider codex-local or /provider cursor."));
             return null;
         }
-        return new AiRequestOptions(provider, apiKey, "", model, effort, streaming, AiBuilderSettings.openRouterProvider());
+        return new AiRequestOptions(provider, apiKey, "", model, effort, streaming, AiBuilderSettings.openRouterProvider(), maxCompletionTokens);
+    }
+
+    private static int setMaxCompletionTokens(CommandSourceStack source, int tokens) {
+        try {
+            AiBuilderSettings.setMaxCompletionTokens(tokens);
+            if (tokens <= 0) {
+                source.sendSuccess(() -> Component.literal("Minedit max completion tokens reset to provider/model default.").withStyle(ChatFormatting.GREEN), false);
+            } else {
+                AiProvider provider = AiProvider.fromId(AiBuilderSettings.provider()).orElse(AiProvider.OPENROUTER);
+                ChatFormatting style = provider == AiProvider.OPENROUTER ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
+                String suffix = provider == AiProvider.OPENROUTER ? "" : " This currently only applies to OpenRouter requests.";
+                source.sendSuccess(() -> Component.literal("Minedit max completion tokens set to " + tokens + "." + suffix).withStyle(style), false);
+            }
+            return 1;
+        } catch (IOException e) {
+            source.sendFailure(Component.literal("Could not save max completion tokens: " + e.getMessage()));
+            return 0;
+        }
     }
 
     private static int setOpenRouterProvider(CommandSourceStack source, String providerSlug) {
@@ -556,6 +640,50 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Choose one with /openrouter provider <slug>, or use /openrouter provider auto.").withStyle(ChatFormatting.GREEN), false);
     }
 
+    private static int teleportToSelection(CommandSourceStack source) {
+        ServerPlayer player;
+        try {
+            player = source.getPlayerOrException();
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("Minedit: /selection tp must be run by a player."));
+            return 0;
+        }
+
+        BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+        if (selection == null) {
+            source.sendFailure(Component.literal("Minedit: no active selection to teleport to."));
+            return 0;
+        }
+
+        ServerLevel level = (ServerLevel) player.level();
+        double x = (selection.minX() + selection.maxX() + 1) / 2.0;
+        double z = (selection.minZ() + selection.maxZ() + 1) / 2.0;
+        int blockX = (int) Math.floor(x);
+        int blockZ = (int) Math.floor(z);
+        int y = safeTeleportY(level, selection, blockX, blockZ);
+        player.teleportTo(x, y, z);
+        source.sendSuccess(() -> Component.literal("Minedit: teleported to selection center at "
+                + formatCoordinate(x) + " " + y + " " + formatCoordinate(z) + ".").withStyle(ChatFormatting.GREEN), false);
+        return 1;
+    }
+
+    private static int safeTeleportY(ServerLevel level, BuildSelection selection, int x, int z) {
+        int minY = level.getMinY();
+        int maxY = level.getMaxY() - 2;
+        int startY = Math.max(minY + 1, selection.baseY() + 1);
+        for (int y = startY; y <= maxY; y++) {
+            BlockPos feet = new BlockPos(x, y, z);
+            if (level.isEmptyBlock(feet) && level.isEmptyBlock(feet.above())) {
+                return y;
+            }
+        }
+        return Math.max(minY + 1, Math.min(maxY, startY));
+    }
+
+    private static String formatCoordinate(double value) {
+        return value == Math.rint(value) ? Long.toString(Math.round(value)) : Double.toString(value);
+    }
+
     private static boolean isLocalAgentProvider(AiProvider provider) {
         return provider == AiProvider.CODEX_LOCAL || provider == AiProvider.CURSOR;
     }
@@ -620,6 +748,7 @@ public class AiBuilderCommands {
         String quickEffort = AiBuilderSettings.quickEffort();
         boolean streaming = AiBuilderSettings.streaming();
         String openRouterProvider = AiBuilderSettings.openRouterProvider();
+        int maxCompletionTokens = AiBuilderSettings.maxCompletionTokens();
         String codexUrl = AiBuilderSettings.codexUrl();
         boolean hasOpenRouterKey = !AiBuilderSettings.apiKey().isEmpty();
 
@@ -629,6 +758,7 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Reasoning effort: " + effort).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Quick edit effort: " + quickEffort).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter inference provider: " + (openRouterProvider.isBlank() ? "automatic" : openRouterProvider + " (no fallback)")).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("Max completion tokens: " + (maxCompletionTokens > 0 ? maxCompletionTokens : "provider/model default")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter streaming: " + (streaming ? "enabled" : "disabled")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("Local bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
@@ -637,11 +767,7 @@ public class AiBuilderCommands {
 
         if (source.getEntity() instanceof ServerPlayer player) {
             SelectionManager.selection(player.getUUID()).ifPresentOrElse(selection -> {
-                String text = "Selection: "
-                        + selection.width() + " x " + selection.depth()
-                        + " footprint at base Y " + selection.baseY()
-                        + " from X " + selection.minX() + ".." + selection.maxX()
-                        + ", Z " + selection.minZ() + ".." + selection.maxZ();
+                String text = "Selection: " + selection.shortSummary() + ". Reuse: " + selection.reuseCommand();
                 source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GREEN), false);
             }, () -> source.sendSuccess(() -> Component.literal("Selection: none").withStyle(ChatFormatting.YELLOW), false));
 

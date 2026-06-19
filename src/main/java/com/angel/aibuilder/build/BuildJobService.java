@@ -591,7 +591,7 @@ public final class BuildJobService {
         if (options.provider() == AiProvider.CURSOR) {
             return CURSOR_CLIENT.complete(options.codexUrl(), options.model(), options.effort(), prompt, token);
         }
-        return OPENROUTER_CLIENT.complete(options.openRouterApiKey(), options.model(), options.effort(), prompt, options.openRouterProvider(), options.streaming(), token, progress);
+        return OPENROUTER_CLIENT.complete(options.openRouterApiKey(), options.model(), options.effort(), prompt, options.openRouterProvider(), options.streaming(), options.maxCompletionTokens(), token, progress);
     }
 
     private static AiCompletion agentBuildCompletion(AiRequestOptions options, String prompt, int width, int depth, CancellationToken token, java.util.function.Consumer<String> progress) throws Exception {

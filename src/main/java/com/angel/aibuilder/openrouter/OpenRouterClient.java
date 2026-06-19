@@ -49,12 +49,19 @@ public final class OpenRouterClient {
     }
 
     public AiCompletion complete(String apiKey, String model, String effort, String prompt, String providerSlug, boolean stream, CancellationToken token, Consumer<String> progress) throws IOException, InterruptedException {
+        return complete(apiKey, model, effort, prompt, providerSlug, stream, 0, token, progress);
+    }
+
+    public AiCompletion complete(String apiKey, String model, String effort, String prompt, String providerSlug, boolean stream, int maxCompletionTokens, CancellationToken token, Consumer<String> progress) throws IOException, InterruptedException {
         token.throwIfCancelled();
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("temperature", 0.25);
         body.addProperty("reasoning_effort", effort);
         body.addProperty("stream", stream);
+        if (maxCompletionTokens > 0) {
+            body.addProperty("max_completion_tokens", maxCompletionTokens);
+        }
         JsonObject reasoning = new JsonObject();
         reasoning.addProperty("effort", effort);
         body.add("reasoning", reasoning);

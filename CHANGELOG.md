@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.0
+
+### Added
+
+- `/selection tp` and `/selection teleport` move the player to the active selection.
+- `/selection restore` restores the previous selection after an accidental reselection.
+- `/selection set <x1> <y1> <z1> <x2> <y2> <z2>` recreates a selection from saved coordinates.
+- Selection chat messages now include a compact coordinate summary and reusable `/selection set ...` command.
+- `/maxtokens <tokens>` and `/maxcompletiontokens <tokens>` set OpenRouter `max_completion_tokens`.
+- `/maxtokens default` and `/maxcompletiontokens default` restore the provider/model default completion limit.
+
 ## 1.6.0
 
 ### Added
