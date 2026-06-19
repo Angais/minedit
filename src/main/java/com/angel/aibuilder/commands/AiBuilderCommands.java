@@ -25,6 +25,7 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -74,6 +75,26 @@ public class AiBuilderCommands {
                             }
                             return 1;
                         })));
+
+        event.getDispatcher().register(Commands.literal("openrouter")
+                .then(Commands.literal("provider")
+                        .executes(ctx -> {
+                            sendOpenRouterProvider(ctx.getSource());
+                            return 1;
+                        })
+                        .then(Commands.literal("list")
+                                .executes(ctx -> {
+                                    listOpenRouterProviders(ctx.getSource());
+                                    return 1;
+                                }))
+                        .then(Commands.literal("auto")
+                                .executes(ctx -> setOpenRouterProvider(ctx.getSource(), "")))
+                        .then(Commands.literal("default")
+                                .executes(ctx -> setOpenRouterProvider(ctx.getSource(), "")))
+                        .then(Commands.literal("reset")
+                                .executes(ctx -> setOpenRouterProvider(ctx.getSource(), "")))
+                        .then(Commands.argument("provider_slug", StringArgumentType.word())
+                                .executes(ctx -> setOpenRouterProvider(ctx.getSource(), StringArgumentType.getString(ctx, "provider_slug"))))));
 
         event.getDispatcher().register(Commands.literal("codexurl")
                 .then(Commands.argument("url", StringArgumentType.greedyString())
@@ -451,7 +472,7 @@ public class AiBuilderCommands {
         String effort = quick ? AiBuilderSettings.quickEffort() : AiBuilderSettings.effort();
         boolean streaming = AiBuilderSettings.streaming();
         if (provider == AiProvider.CODEX_LOCAL || provider == AiProvider.CURSOR) {
-            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort, streaming);
+            return new AiRequestOptions(provider, "", AiBuilderSettings.codexUrl(), model, effort, streaming, "");
         }
 
         String apiKey = AiBuilderSettings.apiKey();
@@ -459,7 +480,80 @@ public class AiBuilderCommands {
             source.sendFailure(Component.literal("Set your OpenRouter key first with /apikey <key>, or use /provider codex-local or /provider cursor."));
             return null;
         }
-        return new AiRequestOptions(provider, apiKey, "", model, effort, streaming);
+        return new AiRequestOptions(provider, apiKey, "", model, effort, streaming, AiBuilderSettings.openRouterProvider());
+    }
+
+    private static int setOpenRouterProvider(CommandSourceStack source, String providerSlug) {
+        String normalized = providerSlug == null ? "" : providerSlug.trim().toLowerCase(Locale.ROOT);
+        if (!normalized.isEmpty() && !normalized.matches("[a-z0-9][a-z0-9._/-]*")) {
+            source.sendFailure(Component.literal("Invalid OpenRouter provider slug. Use /openrouter provider list to see valid slugs for the current model."));
+            return 0;
+        }
+        try {
+            AiBuilderSettings.setOpenRouterProvider(normalized);
+            if (normalized.isEmpty()) {
+                source.sendSuccess(() -> Component.literal("Minedit OpenRouter inference provider set to automatic routing.").withStyle(ChatFormatting.GREEN), false);
+            } else {
+                source.sendSuccess(() -> Component.literal("Minedit OpenRouter inference provider locked to " + normalized + ". Requests will not fall back to another provider.").withStyle(ChatFormatting.GREEN), false);
+                if (AiProvider.fromId(AiBuilderSettings.provider()).orElse(AiProvider.OPENROUTER) != AiProvider.OPENROUTER) {
+                    source.sendSuccess(() -> Component.literal("This setting will apply after /provider openrouter.").withStyle(ChatFormatting.YELLOW), false);
+                }
+            }
+            return 1;
+        } catch (IOException e) {
+            source.sendFailure(Component.literal("Could not save OpenRouter provider: " + e.getMessage()));
+            return 0;
+        }
+    }
+
+    private static void sendOpenRouterProvider(CommandSourceStack source) {
+        String provider = AiBuilderSettings.openRouterProvider();
+        String label = provider.isBlank() ? "automatic routing" : provider + " (no fallback)";
+        source.sendSuccess(() -> Component.literal("Minedit OpenRouter inference provider: " + label + ".").withStyle(ChatFormatting.GRAY), false);
+    }
+
+    private static void listOpenRouterProviders(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        String apiKey = AiBuilderSettings.apiKey();
+        String model = AiBuilderSettings.model();
+        source.sendSuccess(() -> Component.literal("Minedit: checking OpenRouter providers for " + model + "...").withStyle(ChatFormatting.YELLOW), false);
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return OPENROUTER_CLIENT.listProvidersForModel(apiKey, model);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).thenAccept(providers -> server.execute(() -> sendOpenRouterProviderList(source, model, providers)))
+                .exceptionally(error -> {
+                    server.execute(() -> source.sendFailure(Component.literal("OpenRouter provider list failed: " + rootMessage(error))));
+                    return null;
+                });
+    }
+
+    private static void sendOpenRouterProviderList(CommandSourceStack source, String model, List<OpenRouterClient.ProviderEndpoint> providers) {
+        if (providers.isEmpty()) {
+            source.sendFailure(Component.literal("OpenRouter returned no providers for " + model + "."));
+            return;
+        }
+        source.sendSuccess(() -> Component.literal("OpenRouter providers for " + model + ":").withStyle(ChatFormatting.GOLD), false);
+        StringBuilder chunk = new StringBuilder();
+        for (OpenRouterClient.ProviderEndpoint provider : providers) {
+            String next = provider.slug() + " (" + provider.name() + ")";
+            if (!chunk.isEmpty() && chunk.length() + next.length() + 2 > 230) {
+                String text = chunk.toString();
+                source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GRAY), false);
+                chunk.setLength(0);
+            }
+            if (!chunk.isEmpty()) {
+                chunk.append(", ");
+            }
+            chunk.append(next);
+        }
+        if (!chunk.isEmpty()) {
+            String text = chunk.toString();
+            source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GRAY), false);
+        }
+        source.sendSuccess(() -> Component.literal("Choose one with /openrouter provider <slug>, or use /openrouter provider auto.").withStyle(ChatFormatting.GREEN), false);
     }
 
     private static boolean isLocalAgentProvider(AiProvider provider) {
@@ -525,6 +619,7 @@ public class AiBuilderCommands {
         String effort = AiBuilderSettings.effort();
         String quickEffort = AiBuilderSettings.quickEffort();
         boolean streaming = AiBuilderSettings.streaming();
+        String openRouterProvider = AiBuilderSettings.openRouterProvider();
         String codexUrl = AiBuilderSettings.codexUrl();
         boolean hasOpenRouterKey = !AiBuilderSettings.apiKey().isEmpty();
 
@@ -533,6 +628,7 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Model: " + model).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Reasoning effort: " + effort).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Quick edit effort: " + quickEffort).withStyle(ChatFormatting.GRAY), false);
+        source.sendSuccess(() -> Component.literal("OpenRouter inference provider: " + (openRouterProvider.isBlank() ? "automatic" : openRouterProvider + " (no fallback)")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter streaming: " + (streaming ? "enabled" : "disabled")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("Local bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);

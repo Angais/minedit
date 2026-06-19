@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- `/openrouter provider list` lists the available inference-provider slugs for the selected OpenRouter model.
+- `/openrouter provider <slug>` locks OpenRouter requests to one inference provider with fallbacks disabled.
+- `/openrouter provider auto` restores OpenRouter's automatic provider routing.
+
 ## 1.5.1
 
 ### Added

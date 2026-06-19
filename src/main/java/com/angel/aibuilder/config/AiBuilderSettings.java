@@ -38,6 +38,11 @@ public final class AiBuilderSettings {
         return PROPERTIES.getProperty("model", "openai/gpt-5.5").trim();
     }
 
+    public static synchronized String openRouterProvider() {
+        load();
+        return PROPERTIES.getProperty("openrouter_provider", "").trim();
+    }
+
     public static synchronized String effort() {
         load();
         return PROPERTIES.getProperty("effort", "medium").trim();
@@ -74,6 +79,12 @@ public final class AiBuilderSettings {
     public static synchronized void setModel(String model) throws IOException {
         load();
         PROPERTIES.setProperty("model", model.trim());
+        save();
+    }
+
+    public static synchronized void setOpenRouterProvider(String provider) throws IOException {
+        load();
+        PROPERTIES.setProperty("openrouter_provider", provider.trim());
         save();
     }
 

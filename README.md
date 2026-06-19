@@ -188,6 +188,9 @@ Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor 
 /apikey <openrouter-key>
 /codexurl http://127.0.0.1:8765
 /codex status
+/openrouter provider list
+/openrouter provider <provider-slug>
+/openrouter provider auto
 /model list cursor
 /model <model-id>
 /build export <prompt>
@@ -210,6 +213,7 @@ Defaults:
 
 ```text
 provider: openrouter
+OpenRouter inference provider: automatic
 model: openai/gpt-5.5
 normal effort: medium
 quick edit effort: low
@@ -217,6 +221,8 @@ OpenRouter streaming: enabled
 ```
 
 `/streaming enabled` streams OpenRouter responses and shows progress/reasoning summaries when the provider sends them. `/streaming disabled` waits for the full response before showing usage and queueing placement.
+
+`/provider openrouter` selects OpenRouter as Minedit's AI transport. OpenRouter may still route a model across several inference providers. Use `/openrouter provider list` to see the provider slugs available for the current model, `/openrouter provider <slug>` to lock requests to one provider with no fallback, and `/openrouter provider auto` to restore OpenRouter's automatic routing. The selected slug is saved in `config/minedit.properties`.
 
 `/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are also cancelled through the local bridge when possible.
 

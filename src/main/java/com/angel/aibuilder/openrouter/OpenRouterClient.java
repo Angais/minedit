@@ -21,6 +21,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.Consumer;
@@ -29,6 +32,7 @@ public final class OpenRouterClient {
     private static final Gson GSON = new Gson();
     private static final URI ENDPOINT = URI.create("https://openrouter.ai/api/v1/chat/completions");
     private static final URI GENERATION_ENDPOINT = URI.create("https://openrouter.ai/api/v1/generation");
+    private static final String MODEL_ENDPOINTS_BASE = "https://openrouter.ai/api/v1/models/";
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
 
     public AiCompletion complete(String apiKey, String model, String effort, String prompt) throws IOException, InterruptedException {
@@ -41,6 +45,10 @@ public final class OpenRouterClient {
     }
 
     public AiCompletion complete(String apiKey, String model, String effort, String prompt, boolean stream, CancellationToken token, Consumer<String> progress) throws IOException, InterruptedException {
+        return complete(apiKey, model, effort, prompt, "", stream, token, progress);
+    }
+
+    public AiCompletion complete(String apiKey, String model, String effort, String prompt, String providerSlug, boolean stream, CancellationToken token, Consumer<String> progress) throws IOException, InterruptedException {
         token.throwIfCancelled();
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
@@ -50,6 +58,14 @@ public final class OpenRouterClient {
         JsonObject reasoning = new JsonObject();
         reasoning.addProperty("effort", effort);
         body.add("reasoning", reasoning);
+        if (providerSlug != null && !providerSlug.isBlank()) {
+            JsonArray only = new JsonArray();
+            only.add(providerSlug);
+            JsonObject provider = new JsonObject();
+            provider.add("only", only);
+            provider.addProperty("allow_fallbacks", false);
+            body.add("provider", provider);
+        }
 
         JsonArray messages = new JsonArray();
         JsonObject message = new JsonObject();
@@ -109,6 +125,59 @@ public final class OpenRouterClient {
                 ? (generationId.isBlank() ? "" : "OpenRouter usage: unavailable for " + generationId + ".")
                 : usageSummaryFromResponse(streaming.usageWrapper(), generationId);
         return new AiCompletion(text, usageSummary, generationId);
+    }
+
+    public List<ProviderEndpoint> listProvidersForModel(String apiKey, String model) throws IOException, InterruptedException {
+        int slash = model.indexOf('/');
+        if (slash <= 0 || slash == model.length() - 1) {
+            throw new IOException("OpenRouter model id must include its author, for example openai/gpt-5.5.");
+        }
+
+        String author = encodePathSegment(model.substring(0, slash));
+        String slug = encodePathSegment(model.substring(slash + 1));
+        URI endpoint = URI.create(MODEL_ENDPOINTS_BASE + author + "/" + slug + "/endpoints");
+        HttpRequest.Builder request = HttpRequest.newBuilder(endpoint)
+                .timeout(Duration.ofSeconds(20))
+                .GET();
+        if (apiKey != null && !apiKey.isBlank()) {
+            request.header("Authorization", "Bearer " + apiKey);
+        }
+
+        HttpResponse<String> response = client.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("OpenRouter endpoints lookup returned HTTP " + response.statusCode() + ".");
+        }
+
+        JsonObject json;
+        try {
+            json = JsonParser.parseString(response.body()).getAsJsonObject();
+        } catch (RuntimeException e) {
+            throw new IOException("OpenRouter endpoints lookup returned invalid JSON.", e);
+        }
+
+        JsonObject data = json.has("data") && json.get("data").isJsonObject() ? json.getAsJsonObject("data") : null;
+        JsonArray endpoints = data != null && data.has("endpoints") && data.get("endpoints").isJsonArray()
+                ? data.getAsJsonArray("endpoints")
+                : new JsonArray();
+        Map<String, ProviderEndpoint> providers = new LinkedHashMap<>();
+        for (JsonElement element : endpoints) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject provider = element.getAsJsonObject();
+            String tag = string(provider, "tag", "").trim();
+            if (tag.isBlank()) {
+                continue;
+            }
+            providers.putIfAbsent(tag, new ProviderEndpoint(tag, string(provider, "provider_name", tag)));
+        }
+        return providers.values().stream()
+                .sorted((left, right) -> left.name().compareToIgnoreCase(right.name()))
+                .toList();
+    }
+
+    private static String encodePathSegment(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     private AiCompletion completeNonStreaming(String apiKey, HttpRequest request, CancellationToken token) throws IOException, InterruptedException {
@@ -708,6 +777,9 @@ public final class OpenRouterClient {
     }
 
     private record StreamChunk(String generationId, JsonObject usage) {
+    }
+
+    public record ProviderEndpoint(String slug, String name) {
     }
 
     public record UsageReport(String summary, String costSummary, boolean hasCost) {
