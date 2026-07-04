@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.10.0
+
+### Security
+
+- AI-generated build code now runs in a locked-down Rhino sandbox: safe standard objects only, no access to Java classes outside the mod, a 30-second execution deadline, and a 500,000-operation cap. Previously generated code could reach `java.lang.Runtime`.
+
+### Fixed
+
+- `/stop` is no longer registered on dedicated servers where vanilla already owns it; `/minedit stop` is always available and cancels Minedit work.
+- A fill operation with an unresolvable block id no longer stalls the block placement queue forever.
+
+### Changed
+
+- Blocking AI/HTTP work runs on a dedicated background thread pool instead of the common ForkJoinPool, so long bridge requests no longer starve other parallel work.
+- Block state resolution is cached during placement and structure scans, speeding up large builds and `/edit` scans.
+
 ## 1.9.0
 
 ### Added

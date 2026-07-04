@@ -8,12 +8,31 @@ import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class BlockStateResolver {
+    // Generated builds repeat the same few block specs thousands of times; caching skips
+    // the identifier parse, registry lookup, and property parsing on every placement.
+    private static final int MAX_CACHE_SIZE = 4096;
+    private static final Map<BlockSpec, Optional<BlockState>> CACHE = new ConcurrentHashMap<>();
+
     private BlockStateResolver() {
     }
 
     public static Optional<BlockState> resolve(BlockSpec spec) {
+        Optional<BlockState> cached = CACHE.get(spec);
+        if (cached != null) {
+            return cached;
+        }
+        Optional<BlockState> resolved = resolveUncached(spec);
+        if (CACHE.size() >= MAX_CACHE_SIZE) {
+            CACHE.clear();
+        }
+        CACHE.put(spec, resolved);
+        return resolved;
+    }
+
+    private static Optional<BlockState> resolveUncached(BlockSpec spec) {
         Identifier id;
         try {
             id = Identifier.parse(spec.blockId());

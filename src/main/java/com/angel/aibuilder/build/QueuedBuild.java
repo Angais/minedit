@@ -121,6 +121,7 @@ final class QueuedBuild {
 
     private final class FillCursor {
         private final FillOperation operation;
+        private final BlockState state;
         private final int minX;
         private final int maxX;
         private final int minY;
@@ -135,6 +136,7 @@ final class QueuedBuild {
 
         private FillCursor(FillOperation operation) {
             this.operation = operation;
+            this.state = BlockStateResolver.resolve(operation.block()).orElse(null);
             minX = Math.min(operation.x1(), operation.x2());
             maxX = Math.max(operation.x1(), operation.x2());
             minY = Math.min(operation.y1(), operation.y2());
@@ -142,40 +144,39 @@ final class QueuedBuild {
             minZ = Math.min(operation.z1(), operation.z2());
             maxZ = Math.max(operation.z1(), operation.z2());
             x = minX;
-            y = minY;
             z = minZ;
+            // An unresolvable block id skips the whole fill; the cursor must still finish
+            // or it would stall the build queue forever.
+            y = state == null ? maxY + 1 : minY;
         }
 
         private int place(ServerLevel level, BuildSelection selection, int budget) {
             lastPlaced = 0;
             lastSkipped = 0;
-            Optional<BlockState> state = BlockStateResolver.resolve(operation.block());
-            if (state.isEmpty()) {
+            if (state == null) {
                 lastSkipped++;
-                z = maxZ + 1;
                 return budget - 1;
             }
 
+            String mode = operation.options().mode();
             while (budget > 0 && !done()) {
                 BlockPos pos = new BlockPos(selection.minX() + x, selection.baseY() + y, selection.minZ() + z);
                 BlockState currentState = level.isInWorldBounds(pos) ? level.getBlockState(pos) : null;
                 boolean boundary = x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
-                String mode = operation.options().mode();
                 boolean shouldPlace = switch (mode) {
                     case "hollow", "outline" -> boundary;
                     case "clear" -> currentState != null && !currentState.isAir();
-                    case "keep" -> true;
                     default -> true;
                 };
 
                 if (shouldPlace && insideFootprint(x, z) && level.isInWorldBounds(pos)) {
                     if (!"keep".equals(mode) || currentState == null || currentState.isAir()) {
-                        if (isUnsafeFluidPlacement(state.get(), x, z)) {
+                        if (isUnsafeFluidPlacement(state, x, z)) {
                             QueuedBuild.this.riskyFluidSkipped++;
                             lastSkipped++;
-                        } else if (canPlace(state.get(), pos)) {
+                        } else if (canPlace(state, pos)) {
                             snapshot.capture(pos);
-                            level.setBlock(pos, state.get(), 3);
+                            level.setBlock(pos, state, 3);
                             lastPlaced++;
                         } else {
                             lastSkipped++;

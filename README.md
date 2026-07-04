@@ -12,6 +12,8 @@ This mod sends prompts to the provider you configure. OpenRouter requests use th
 
 Your OpenRouter API key is stored in plaintext in your Minecraft game directory at `config/minedit.properties`. It is not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it.
 
+Generated build code runs in a restricted JavaScript sandbox: it only sees the Minedit builder API (no Java classes, filesystem, or network access), is stopped after 30 seconds of execution, and is capped at 500,000 block operations per run. This limits what a bad model response can do, but it does not make large or broken builds safe for your world.
+
 Back up worlds before testing large builds, staged builds, agent builds, or edits.
 
 ## Requirements
@@ -197,6 +199,7 @@ Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor 
 /model <model-id>
 /maxtokens <tokens>
 /maxtokens default
+/maxcompletiontokens <tokens>
 /build export <prompt>
 /build import
 /effort none
@@ -209,6 +212,7 @@ Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor 
 /streaming enabled
 /streaming disabled
 /stop
+/minedit stop
 /status
 /usage <openrouter-generation-id>
 ```
@@ -231,7 +235,9 @@ OpenRouter streaming: enabled
 
 `/maxtokens <tokens>` sets OpenRouter `max_completion_tokens`. `/maxtokens default` restores the current behavior, where Minedit omits the cap and lets the selected provider/model choose its default.
 
-`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are also cancelled through the local bridge when possible.
+`/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are also cancelled through the local bridge when possible. `/minedit stop` does the same thing and always exists; on dedicated servers, where vanilla already owns `/stop` for shutting the server down, Minedit leaves vanilla `/stop` alone and only `/minedit stop` cancels Minedit work.
+
+`/maxcompletiontokens` is an alias of `/maxtokens`.
 
 `/status` shows the current provider, selected model, normal reasoning effort, quick edit reasoning effort, streaming setting, key/bridge configuration, current selection, active AI generations, and queued block placement jobs.
 

@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +66,9 @@ public final class ExistingStructureScanner {
         int nonAirBlocks = 0;
         String[][][] grid = new String[endY - startY + 1][selection.depth()][selection.width()];
         Map<String, StateSpec> states = new LinkedHashMap<>();
+        // Block states are canonical instances, so each distinct state only needs its
+        // properties reflected once per scan instead of once per block.
+        Map<BlockState, StateSpec> specCache = new HashMap<>();
 
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int y = startY; y <= endY; y++) {
@@ -77,7 +81,7 @@ public final class ExistingStructureScanner {
                         continue;
                     }
 
-                    StateSpec spec = StateSpec.from(state);
+                    StateSpec spec = specCache.computeIfAbsent(state, StateSpec::from);
                     grid[relativeY][z][x] = spec.key();
                     states.putIfAbsent(spec.key(), spec);
                     maxRelativeY = Math.max(maxRelativeY, relativeY);
@@ -190,7 +194,7 @@ public final class ExistingStructureScanner {
         }
     }
 
-    private record StateSpec(String blockId, Map<String, String> states) {
+    private record StateSpec(String blockId, Map<String, String> states, String key) {
         private static StateSpec from(BlockState state) {
             Block block = state.getBlock();
             String blockId = compactBlockId(BuiltInRegistries.BLOCK.getKey(block).toString());
@@ -201,11 +205,7 @@ public final class ExistingStructureScanner {
                     states.put(property.getName(), valueName(state, property));
                 }
             }
-            return new StateSpec(blockId, states);
-        }
-
-        private String key() {
-            return blockId + states;
+            return new StateSpec(blockId, states, blockId + states);
         }
 
         private String arguments() {

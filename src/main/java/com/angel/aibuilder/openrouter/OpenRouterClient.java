@@ -722,10 +722,20 @@ public final class OpenRouterClient {
                 return;
             }
             summaryBuffer.append(text.replaceAll("\\s+", " "));
-            if (summaryBuffer.length() >= 180 || summaryBuffer.toString().matches(".*[.!?]\\s*$")) {
+            if (summaryBuffer.length() >= 180 || endsSentence()) {
                 send("OpenRouter reasoning summary: " + trim(summaryBuffer.toString(), 220));
                 summaryBuffer.setLength(0);
             }
+        }
+
+        private boolean endsSentence() {
+            for (int i = summaryBuffer.length() - 1; i >= 0; i--) {
+                char c = summaryBuffer.charAt(i);
+                if (!Character.isWhitespace(c)) {
+                    return c == '.' || c == '!' || c == '?';
+                }
+            }
+            return false;
         }
 
         private void hiddenReasoning(int charCount) {

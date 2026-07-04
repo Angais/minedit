@@ -7,14 +7,20 @@ import com.angel.aibuilder.build.FillOperation;
 import com.angel.aibuilder.build.FillOptions;
 import com.angel.aibuilder.build.SetBlockOperation;
 import org.mozilla.javascript.Context;
+import org.mozilla.javascript.ContextFactory;
 import org.mozilla.javascript.NativeObject;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 public final class JsBuildRunner {
+    private static final int MAX_RUNTIME_SECONDS = 30;
+    private static final long MAX_RUNTIME_NANOS = TimeUnit.SECONDS.toNanos(MAX_RUNTIME_SECONDS);
+    private static final SandboxContextFactory FACTORY = new SandboxContextFactory();
+
     private JsBuildRunner() {
     }
 
@@ -23,10 +29,10 @@ public final class JsBuildRunner {
     }
 
     public static BuildPlan run(String code, int width, int depth, Map<Integer, ExistingStructureScanner.Line> lines) {
-        Context context = Context.enter();
+        SandboxContext context = (SandboxContext) FACTORY.enterContext();
         try {
-            context.setOptimizationLevel(-1);
-            Scriptable scope = context.initStandardObjects();
+            context.deadlineNanos = System.nanoTime() + MAX_RUNTIME_NANOS;
+            Scriptable scope = context.initSafeStandardObjects();
             BuilderApi api = new BuilderApi(width, depth, lines);
             Object wrappedApi = Context.javaToJS(api, scope);
             ScriptableObject.putProperty(scope, "api", wrappedApi);
@@ -38,9 +44,46 @@ public final class JsBuildRunner {
             }
             function.call(context, scope, scope, new Object[]{wrappedApi});
             return api.plan;
+        } catch (ScriptTimeoutError e) {
+            throw new IllegalStateException("AI build code exceeded the " + MAX_RUNTIME_SECONDS + "s execution limit.");
         } finally {
             Context.exit();
         }
+    }
+
+    // AI-generated code is untrusted. It runs with safe standard objects only, no access to
+    // Java classes outside this mod, a wall-clock deadline, and a BuildPlan operation cap.
+    // Do not replace this with Context.enter()/initStandardObjects(): that exposes LiveConnect
+    // and reopens the java.lang.Runtime escape.
+    private static final class SandboxContextFactory extends ContextFactory {
+        @Override
+        protected Context makeContext() {
+            SandboxContext context = new SandboxContext(this);
+            // Instruction observation requires interpreted mode.
+            context.setInterpretedMode(true);
+            context.setInstructionObserverThreshold(10_000);
+            context.setClassShutter(className -> className.startsWith("com.angel.aibuilder."));
+            return context;
+        }
+
+        @Override
+        protected void observeInstructionCount(Context context, int instructionCount) {
+            if (context instanceof SandboxContext sandbox && System.nanoTime() >= sandbox.deadlineNanos) {
+                // An Error so script-level try/catch cannot swallow the deadline.
+                throw new ScriptTimeoutError();
+            }
+        }
+    }
+
+    private static final class SandboxContext extends Context {
+        private long deadlineNanos = Long.MAX_VALUE;
+
+        private SandboxContext(ContextFactory factory) {
+            super(factory);
+        }
+    }
+
+    private static final class ScriptTimeoutError extends Error {
     }
 
     public static final class BuilderApi {

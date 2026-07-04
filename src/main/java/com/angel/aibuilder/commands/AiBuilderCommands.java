@@ -1,5 +1,6 @@
 package com.angel.aibuilder.commands;
 
+import com.angel.aibuilder.ai.AiExecutors;
 import com.angel.aibuilder.ai.AiProvider;
 import com.angel.aibuilder.ai.AiRequestOptions;
 import com.angel.aibuilder.build.BuildJobService;
@@ -120,7 +121,7 @@ public class AiBuilderCommands {
                             String url = AiBuilderSettings.codexUrl();
                             String model = AiBuilderSettings.model();
                             source.sendSuccess(() -> Component.literal("Minedit: checking Codex bridge at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
-                            CompletableFuture.supplyAsync(() -> {
+                            background(() -> {
                                 try {
                                     return CODEX_CLIENT.status(url, model);
                                 } catch (Exception e) {
@@ -204,18 +205,15 @@ public class AiBuilderCommands {
                 .then(Commands.argument("tokens", IntegerArgumentType.integer(1))
                         .executes(ctx -> setMaxCompletionTokens(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "tokens")))));
 
-        event.getDispatcher().register(Commands.literal("stop")
-                .executes(ctx -> {
-                    ServerPlayer player = ctx.getSource().getPlayerOrException();
-                    int generationCount = BuildJobService.cancelGenerations(player.getUUID());
-                    int queuedCount = BuildQueue.cancelBuilds(player.getUUID());
-                    if (generationCount == 0 && queuedCount == 0) {
-                        ctx.getSource().sendSuccess(() -> Component.literal("Minedit: nothing active to stop.").withStyle(ChatFormatting.YELLOW), false);
-                    } else {
-                        ctx.getSource().sendSuccess(() -> Component.literal("Minedit: stop requested. Canceled " + generationCount + " active generation(s) and removed " + queuedCount + " queued placement job(s).").withStyle(ChatFormatting.YELLOW), false);
-                    }
-                    return 1;
-                }));
+        // Registering a root literal vanilla already owns (like /stop on dedicated servers)
+        // merges Brigadier nodes and hijacks the vanilla command. /minedit stop always works.
+        if (event.getDispatcher().getRoot().getChild("stop") == null) {
+            event.getDispatcher().register(Commands.literal("stop")
+                    .executes(ctx -> stopJobs(ctx.getSource())));
+        }
+        event.getDispatcher().register(Commands.literal("minedit")
+                .then(Commands.literal("stop")
+                        .executes(ctx -> stopJobs(ctx.getSource()))));
 
         event.getDispatcher().register(Commands.literal("status")
                 .executes(ctx -> {
@@ -236,7 +234,7 @@ public class AiBuilderCommands {
 
                             String generationId = StringArgumentType.getString(ctx, "generation_id");
                             source.sendSuccess(() -> Component.literal("Minedit: checking OpenRouter usage for " + generationId + "...").withStyle(ChatFormatting.YELLOW), false);
-                            CompletableFuture.supplyAsync(() -> {
+                            background(() -> {
                                 try {
                                     return OPENROUTER_CLIENT.fetchUsageReport(apiKey, generationId);
                                 } catch (Exception e) {
@@ -531,6 +529,18 @@ public class AiBuilderCommands {
                                                                         })))))))));
     }
 
+    private static int stopJobs(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        int generationCount = BuildJobService.cancelGenerations(player.getUUID());
+        int queuedCount = BuildQueue.cancelBuilds(player.getUUID());
+        if (generationCount == 0 && queuedCount == 0) {
+            source.sendSuccess(() -> Component.literal("Minedit: nothing active to stop.").withStyle(ChatFormatting.YELLOW), false);
+        } else {
+            source.sendSuccess(() -> Component.literal("Minedit: stop requested. Canceled " + generationCount + " active generation(s) and removed " + queuedCount + " queued placement job(s).").withStyle(ChatFormatting.YELLOW), false);
+        }
+        return 1;
+    }
+
     private static AiRequestOptions requestOptions(CommandSourceStack source, boolean quick) {
         AiProvider provider = AiProvider.fromId(AiBuilderSettings.provider()).orElse(AiProvider.OPENROUTER);
         String model = AiBuilderSettings.model();
@@ -601,7 +611,7 @@ public class AiBuilderCommands {
         String apiKey = AiBuilderSettings.apiKey();
         String model = AiBuilderSettings.model();
         source.sendSuccess(() -> Component.literal("Minedit: checking OpenRouter providers for " + model + "...").withStyle(ChatFormatting.YELLOW), false);
-        CompletableFuture.supplyAsync(() -> {
+        background(() -> {
             try {
                 return OPENROUTER_CLIENT.listProvidersForModel(apiKey, model);
             } catch (Exception e) {
@@ -702,7 +712,7 @@ public class AiBuilderCommands {
         MinecraftServer server = source.getServer();
         String url = AiBuilderSettings.codexUrl();
         source.sendSuccess(() -> Component.literal("Minedit: checking Cursor models through local bridge at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
-        CompletableFuture.supplyAsync(() -> {
+        background(() -> {
             try {
                 return CURSOR_CLIENT.listModels(url);
             } catch (Exception e) {
@@ -790,6 +800,10 @@ public class AiBuilderCommands {
         } else {
             source.sendFailure(Component.literal("Current model `" + currentModel + "` was not found in Codex. Try /model gpt-5.5."));
         }
+    }
+
+    private static <T> CompletableFuture<T> background(java.util.function.Supplier<T> task) {
+        return CompletableFuture.supplyAsync(task, AiExecutors.BACKGROUND);
     }
 
     private static String rootMessage(Throwable throwable) {
