@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.HashSet;
 import java.util.Set;
 
 public class AiBuilderCommands {
@@ -150,6 +151,7 @@ public class AiBuilderCommands {
                             try {
                                 AiBuilderSettings.setEffort(effort);
                                 ctx.getSource().sendSuccess(() -> Component.literal("Minedit reasoning effort set to " + effort).withStyle(ChatFormatting.GREEN), false);
+                                checkEffortSupport(ctx.getSource(), AiBuilderSettings.model(), true, new EffortCheck(effort, "reasoning effort"));
                             } catch (IOException e) {
                                 ctx.getSource().sendFailure(Component.literal("Could not save effort: " + e.getMessage()));
                             }
@@ -169,6 +171,9 @@ public class AiBuilderCommands {
                                 String model = StringArgumentType.getString(ctx, "model");
                                 AiBuilderSettings.setModel(model);
                                 ctx.getSource().sendSuccess(() -> Component.literal("Minedit model set to " + model).withStyle(ChatFormatting.GREEN), false);
+                                checkEffortSupport(ctx.getSource(), model, false,
+                                        new EffortCheck(AiBuilderSettings.effort(), "reasoning effort"),
+                                        new EffortCheck(AiBuilderSettings.quickEffort(), "quick edit effort"));
                             } catch (IOException e) {
                                 ctx.getSource().sendFailure(Component.literal("Could not save model: " + e.getMessage()));
                             }
@@ -418,6 +423,7 @@ public class AiBuilderCommands {
                                             try {
                                                 AiBuilderSettings.setQuickEffort(effort);
                                                 ctx.getSource().sendSuccess(() -> Component.literal("Minedit quick edit effort set to " + effort).withStyle(ChatFormatting.GREEN), false);
+                                                checkEffortSupport(ctx.getSource(), AiBuilderSettings.model(), true, new EffortCheck(effort, "quick edit effort"));
                                             } catch (IOException e) {
                                                 ctx.getSource().sendFailure(Component.literal("Could not save quick edit effort: " + e.getMessage()));
                                             }
@@ -561,6 +567,54 @@ public class AiBuilderCommands {
             }
         }
         return 1;
+    }
+
+    private record EffortCheck(String effort, String label) {
+    }
+
+    /**
+     * Advisory check against OpenRouter's per-model supported reasoning efforts. Runs in the
+     * background and stays silent on network errors; OpenRouter itself maps unsupported
+     * efforts to the nearest supported level, so this only informs, never blocks.
+     */
+    private static void checkEffortSupport(CommandSourceStack source, String model, boolean reportUnknown, EffortCheck... checks) {
+        if (AiProvider.fromId(AiBuilderSettings.provider()).orElse(AiProvider.OPENROUTER) != AiProvider.OPENROUTER) {
+            return;
+        }
+        MinecraftServer server = source.getServer();
+        String apiKey = AiBuilderSettings.apiKey();
+        AiExecutors.supply(() -> {
+            try {
+                return OPENROUTER_CLIENT.fetchModelReasoning(apiKey, model);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).thenAccept(reasoning -> server.execute(() -> {
+            if (reasoning.isEmpty()) {
+                if (reportUnknown) {
+                    source.sendSuccess(() -> Component.literal("Minedit: OpenRouter doesn't list reasoning support for " + model + "; the effort setting may be ignored.").withStyle(ChatFormatting.YELLOW), false);
+                }
+                return;
+            }
+            Set<String> reported = new HashSet<>();
+            for (EffortCheck check : checks) {
+                if (reported.add(check.effort())) {
+                    sendEffortMismatch(source, model, check.effort(), check.label(), reasoning.get());
+                }
+            }
+        })).exceptionally(error -> null);
+    }
+
+    private static void sendEffortMismatch(CommandSourceStack source, String model, String effort, String label, OpenRouterClient.ModelReasoning reasoning) {
+        if (reasoning.supports(effort)) {
+            return;
+        }
+        String nearest = reasoning.nearestEffort(effort);
+        String reason = "none".equals(effort) && reasoning.mandatory()
+                ? "reasoning cannot be disabled for " + model
+                : model + " supports reasoning efforts " + String.join(", ", reasoning.supportedEfforts());
+        source.sendSuccess(() -> Component.literal("Minedit: " + reason + ". Your " + label + " '" + effort
+                + "' will be treated as '" + nearest + "' by OpenRouter.").withStyle(ChatFormatting.YELLOW), false);
     }
 
     private static AiRequestOptions requestOptions(CommandSourceStack source, boolean quick) {

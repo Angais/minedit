@@ -4,6 +4,8 @@
 
 ### Added
 
+- Minedit now checks the selected model's supported reasoning efforts against OpenRouter's model metadata: `/effort`, `/edit set quickeffort`, and `/model` warn when the configured effort isn't supported and tell you which level OpenRouter will map it to (for example `max` becomes `xhigh` on GPT-5.5).
+
 - `/minedit stop <player>` lets operators cancel another player's generations and queued placements; `/minedit stop` now also works from the server console with a player argument.
 - Undo history: Minedit keeps the last 5 build snapshots per player, so `/reset build` can be repeated to walk back through recent builds and edits.
 - Builds larger than ~10,000 blocks report placement progress in chat every 10 seconds.

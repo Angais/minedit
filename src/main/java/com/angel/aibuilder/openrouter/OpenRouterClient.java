@@ -21,6 +21,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +35,13 @@ public final class OpenRouterClient {
     private static final URI ENDPOINT = URI.create("https://openrouter.ai/api/v1/chat/completions");
     private static final URI GENERATION_ENDPOINT = URI.create("https://openrouter.ai/api/v1/generation");
     private static final String MODEL_ENDPOINTS_BASE = "https://openrouter.ai/api/v1/models/";
+    private static final URI MODELS_ENDPOINT = URI.create("https://openrouter.ai/api/v1/models");
+    // Reasoning metadata (supported efforts) only appears on the full model listing — the
+    // per-model endpoints route omits it — so the parsed listing is cached for a while.
+    private static final Duration MODEL_REASONING_TTL = Duration.ofMinutes(10);
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
+    private volatile Map<String, ModelReasoning> reasoningCache = Map.of();
+    private volatile long reasoningCacheExpiresNanos = Long.MIN_VALUE;
 
     public AiCompletion complete(String apiKey, String model, String effort, String prompt) throws IOException, InterruptedException {
         return complete(apiKey, model, effort, prompt, true, new CancellationToken(), ignored -> {
@@ -181,6 +189,106 @@ public final class OpenRouterClient {
         return providers.values().stream()
                 .sorted((left, right) -> left.name().compareToIgnoreCase(right.name()))
                 .toList();
+    }
+
+    /**
+     * Returns the reasoning capabilities OpenRouter advertises for a model, or empty when
+     * the model is unknown or does not expose reasoning support.
+     */
+    public Optional<ModelReasoning> fetchModelReasoning(String apiKey, String model) throws IOException, InterruptedException {
+        Map<String, ModelReasoning> cache = reasoningCache;
+        if (System.nanoTime() >= reasoningCacheExpiresNanos) {
+            cache = loadModelReasoning(apiKey);
+            reasoningCache = cache;
+            reasoningCacheExpiresNanos = System.nanoTime() + MODEL_REASONING_TTL.toNanos();
+        }
+        return Optional.ofNullable(cache.get(model));
+    }
+
+    private Map<String, ModelReasoning> loadModelReasoning(String apiKey) throws IOException, InterruptedException {
+        HttpRequest.Builder request = HttpRequest.newBuilder(MODELS_ENDPOINT)
+                .timeout(Duration.ofSeconds(20))
+                .GET();
+        if (apiKey != null && !apiKey.isBlank()) {
+            request.header("Authorization", "Bearer " + apiKey);
+        }
+
+        HttpResponse<String> response = client.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("OpenRouter model list returned HTTP " + response.statusCode() + ".");
+        }
+
+        JsonObject json;
+        try {
+            json = JsonParser.parseString(response.body()).getAsJsonObject();
+        } catch (RuntimeException e) {
+            throw new IOException("OpenRouter model list returned invalid JSON.", e);
+        }
+
+        JsonArray data = json.has("data") && json.get("data").isJsonArray() ? json.getAsJsonArray("data") : new JsonArray();
+        Map<String, ModelReasoning> models = new HashMap<>();
+        for (JsonElement element : data) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject modelJson = element.getAsJsonObject();
+            String id = string(modelJson, "id", "").trim();
+            if (id.isEmpty() || !modelJson.has("reasoning") || !modelJson.get("reasoning").isJsonObject()) {
+                continue;
+            }
+            JsonObject reasoning = modelJson.getAsJsonObject("reasoning");
+            List<String> efforts = new ArrayList<>();
+            if (reasoning.has("supported_efforts") && reasoning.get("supported_efforts").isJsonArray()) {
+                for (JsonElement effort : reasoning.getAsJsonArray("supported_efforts")) {
+                    if (effort.isJsonPrimitive()) {
+                        efforts.add(effort.getAsString());
+                    }
+                }
+            }
+            if (efforts.isEmpty()) {
+                continue;
+            }
+            boolean mandatory = reasoning.has("mandatory") && reasoning.get("mandatory").isJsonPrimitive()
+                    && reasoning.get("mandatory").getAsJsonPrimitive().isBoolean()
+                    && reasoning.get("mandatory").getAsBoolean();
+            models.put(id, new ModelReasoning(List.copyOf(efforts), string(reasoning, "default_effort", ""), mandatory));
+        }
+        return Map.copyOf(models);
+    }
+
+    public record ModelReasoning(List<String> supportedEfforts, String defaultEffort, boolean mandatory) {
+        private static final List<String> EFFORT_ORDER = List.of("none", "minimal", "low", "medium", "high", "xhigh", "max");
+
+        public boolean supports(String effort) {
+            return supportedEfforts.contains(effort);
+        }
+
+        /**
+         * The level OpenRouter will map an unsupported effort to: the closest supported
+         * level, preferring the higher one on ties.
+         */
+        public String nearestEffort(String requested) {
+            int target = EFFORT_ORDER.indexOf(requested);
+            String best = null;
+            int bestIndex = -1;
+            int bestDistance = Integer.MAX_VALUE;
+            for (String candidate : supportedEfforts) {
+                int index = EFFORT_ORDER.indexOf(candidate);
+                if (index < 0) {
+                    continue;
+                }
+                int distance = Math.abs(index - target);
+                if (distance < bestDistance || (distance == bestDistance && index > bestIndex)) {
+                    best = candidate;
+                    bestIndex = index;
+                    bestDistance = distance;
+                }
+            }
+            if (best != null) {
+                return best;
+            }
+            return defaultEffort.isEmpty() ? supportedEfforts.get(0) : defaultEffort;
+        }
     }
 
     private static String encodePathSegment(String value) {

@@ -236,6 +236,8 @@ OpenRouter streaming: enabled
 
 `/maxtokens <tokens>` sets OpenRouter `max_completion_tokens`. `/maxtokens default` restores the current behavior, where Minedit omits the cap and lets the selected provider/model choose its default.
 
+Not every model supports every reasoning effort (for example Claude Fable 5 goes up to `max` while GPT-5.5 tops out at `xhigh`). When the provider is OpenRouter, `/effort`, `/edit set quickeffort`, and `/model` check the selected model's supported efforts against OpenRouter's model metadata and warn you when your setting isn't supported, including the level OpenRouter will actually use — OpenRouter maps unsupported efforts to the nearest supported level rather than failing the request. The check is advisory and never blocks the command; if the lookup fails (offline, model unknown), the setting is saved as-is.
+
 `/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are also cancelled through the local bridge when possible. `/minedit stop` does the same thing and always exists; on dedicated servers, where vanilla already owns `/stop` for shutting the server down, Minedit leaves vanilla `/stop` alone and only `/minedit stop` cancels Minedit work.
 
 `/minedit stop <player>` lets operators (gamemaster permission) cancel another player's generations and queued placements, and is the form to use from the server console. The affected player is notified in chat.
