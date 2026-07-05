@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.1
+
+### Added
+
+- Mod logo shown in the NeoForge mods list.
+
 ## 1.11.0
 
 ### Added
