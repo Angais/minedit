@@ -138,6 +138,10 @@ dependencies {
         }
     }
 
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
@@ -182,6 +186,12 @@ publishing {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+}
+
+// The tests only exercise pure-JVM classes (Rhino sandbox, response parsing, plan caps),
+// so they run without a Minecraft classpath.
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
 }
 
 tasks.named('jar', Jar).configure {

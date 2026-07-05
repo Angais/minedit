@@ -1,9 +1,11 @@
 package com.angel.aibuilder.ai;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 public final class AiExecutors {
     /**
@@ -20,6 +22,10 @@ public final class AiExecutors {
             return thread;
         }
     });
+
+    public static <T> CompletableFuture<T> supply(Supplier<T> task) {
+        return CompletableFuture.supplyAsync(task, BACKGROUND);
+    }
 
     private AiExecutors() {
     }

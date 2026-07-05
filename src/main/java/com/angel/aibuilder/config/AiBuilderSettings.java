@@ -18,9 +18,22 @@ public final class AiBuilderSettings {
     private AiBuilderSettings() {
     }
 
+    // Lets server operators keep the key out of config/minedit.properties (and out of
+    // modpack zips and support logs that include it).
+    private static final String API_KEY_ENV = "OPENROUTER_API_KEY";
+
     public static synchronized String apiKey() {
+        String env = System.getenv(API_KEY_ENV);
+        if (env != null && !env.isBlank()) {
+            return env.trim();
+        }
         load();
         return PROPERTIES.getProperty("openrouter_api_key", "").trim();
+    }
+
+    public static boolean apiKeyFromEnvironment() {
+        String env = System.getenv(API_KEY_ENV);
+        return env != null && !env.isBlank();
     }
 
     public static synchronized String provider() {

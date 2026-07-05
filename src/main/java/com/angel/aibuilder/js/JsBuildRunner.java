@@ -29,9 +29,14 @@ public final class JsBuildRunner {
     }
 
     public static BuildPlan run(String code, int width, int depth, Map<Integer, ExistingStructureScanner.Line> lines) {
+        return run(code, width, depth, lines, MAX_RUNTIME_NANOS);
+    }
+
+    // Visible for tests, which shrink the deadline so timeout coverage does not wait 30s.
+    static BuildPlan run(String code, int width, int depth, Map<Integer, ExistingStructureScanner.Line> lines, long maxRuntimeNanos) {
         SandboxContext context = (SandboxContext) FACTORY.enterContext();
         try {
-            context.deadlineNanos = System.nanoTime() + MAX_RUNTIME_NANOS;
+            context.deadlineNanos = System.nanoTime() + maxRuntimeNanos;
             Scriptable scope = context.initSafeStandardObjects();
             BuilderApi api = new BuilderApi(width, depth, lines);
             Object wrappedApi = Context.javaToJS(api, scope);

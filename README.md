@@ -10,7 +10,7 @@ Minedit is a work in progress. Expect things to break.
 
 This mod sends prompts to the provider you configure. OpenRouter requests use the API key you configure. Codex local bridge requests use your local Codex/OpenAI login and may consume Codex, ChatGPT, or OpenAI plan limits. Cursor local bridge requests use your local Cursor login or API key and may consume Cursor plan limits. Depending on your provider, model, account, and usage, requests may cost money or consume plan limits. You are responsible for all usage and charges caused by your configured provider. Use this mod at your own risk. The author is not responsible for unexpected costs, world changes, broken builds, broken saves, or other side effects.
 
-Your OpenRouter API key is stored in plaintext in your Minecraft game directory at `config/minedit.properties`. It is not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it.
+Your OpenRouter API key is stored in plaintext in your Minecraft game directory at `config/minedit.properties`. It is not stored per-world. Do not share this file, screenshots of it, modpacks containing it, or support logs that include it. Alternatively, set the `OPENROUTER_API_KEY` environment variable before launching the game or server; it takes precedence over the saved key and keeps the key out of the config directory entirely.
 
 Generated build code runs in a restricted JavaScript sandbox: it only sees the Minedit builder API (no Java classes, filesystem, or network access), is stopped after 30 seconds of execution, and is capped at 500,000 block operations per run. This limits what a bad model response can do, but it does not make large or broken builds safe for your world.
 
@@ -213,6 +213,7 @@ Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor 
 /streaming disabled
 /stop
 /minedit stop
+/minedit stop <player>
 /status
 /usage <openrouter-generation-id>
 ```
@@ -236,6 +237,10 @@ OpenRouter streaming: enabled
 `/maxtokens <tokens>` sets OpenRouter `max_completion_tokens`. `/maxtokens default` restores the current behavior, where Minedit omits the cap and lets the selected provider/model choose its default.
 
 `/stop` requests cancellation for your current Minedit generation and removes your queued block placement jobs. It can interrupt OpenRouter streams and queued placement immediately. Codex and Cursor agent jobs are also cancelled through the local bridge when possible. `/minedit stop` does the same thing and always exists; on dedicated servers, where vanilla already owns `/stop` for shutting the server down, Minedit leaves vanilla `/stop` alone and only `/minedit stop` cancels Minedit work.
+
+`/minedit stop <player>` lets operators (gamemaster permission) cancel another player's generations and queued placements, and is the form to use from the server console. The affected player is notified in chat.
+
+Builds larger than about 10,000 blocks report placement progress in chat every 10 seconds. When several players have builds placing at once, the per-tick block budget is shared between them instead of processing one build at a time.
 
 `/maxcompletiontokens` is an alias of `/maxtokens`.
 
@@ -286,6 +291,8 @@ Undo the last generated build/edit for your player:
 ```mcfunction
 /reset build
 ```
+
+Minedit keeps the last 5 build snapshots per player, so running `/reset build` repeatedly walks further back through your recent builds and edits. If a build is still placing blocks, `/reset build` cancels it first so the restore is not fighting live placement.
 
 Clear the current selection:
 

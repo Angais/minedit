@@ -13,6 +13,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class BlockStateResolver {
     // Generated builds repeat the same few block specs thousands of times; caching skips
     // the identifier parse, registry lookup, and property parsing on every placement.
+    // Clearing the whole cache at the cap is intentional: real builds use well under a
+    // hundred distinct specs, so eviction order is not worth the bookkeeping of an LRU.
     private static final int MAX_CACHE_SIZE = 4096;
     private static final Map<BlockSpec, Optional<BlockState>> CACHE = new ConcurrentHashMap<>();
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `/minedit stop <player>` lets operators cancel another player's generations and queued placements; `/minedit stop` now also works from the server console with a player argument.
+- Undo history: Minedit keeps the last 5 build snapshots per player, so `/reset build` can be repeated to walk back through recent builds and edits.
+- Builds larger than ~10,000 blocks report placement progress in chat every 10 seconds.
+- The OpenRouter API key can be provided via the `OPENROUTER_API_KEY` environment variable, which takes precedence over `config/minedit.properties`.
+- Unit tests covering the JS sandbox (Java access, deadline, uncatchable timeout), the build plan operation cap, and model response parsing; they run in CI on every push.
+
+### Fixed
+
+- `/reset build` now always cancels the player's in-flight placement job before restoring, even when invoked through code paths that skipped the cancellation.
+- Build queues, undo snapshots, and pending restores are cleared when the server stops, so they no longer leak level references across world reloads in singleplayer.
+
+### Changed
+
+- The per-tick block placement budget is shared fairly across all players' queued builds instead of processing one build at a time.
+
 ## 1.10.0
 
 ### Security

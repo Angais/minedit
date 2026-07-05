@@ -12,15 +12,20 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 final class QueuedBuild {
-    private static final int BLOCKS_PER_TICK = 512;
+    private static final long PROGRESS_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(10);
+    private static final int PROGRESS_MIN_BLOCKS = 10_000;
 
     private final UUID playerId;
     private final ServerLevel level;
     private final BuildSelection selection;
     private final Queue<BuildOperation> operations;
     private final BuildUndoManager.Snapshot snapshot;
+    private final long estimatedBlocks;
+    private long processed;
+    private long lastProgressNanos = System.nanoTime();
     private FillCursor cursor;
     private int placed;
     private int skipped;
@@ -36,17 +41,18 @@ final class QueuedBuild {
         this.selection = selection;
         this.operations = new ArrayDeque<>(operations);
         this.snapshot = snapshot;
+        this.estimatedBlocks = estimateBlocks(operations);
     }
 
     boolean isFor(UUID playerId) {
         return this.playerId.equals(playerId);
     }
 
-    boolean tick() {
-        int budget = BLOCKS_PER_TICK;
-        while (budget > 0) {
+    boolean tick(int budget) {
+        int remaining = budget;
+        while (remaining > 0) {
             if (cursor != null) {
-                budget = cursor.place(level, selection, budget);
+                remaining = cursor.place(level, selection, remaining);
                 placed += cursor.lastPlaced;
                 skipped += cursor.lastSkipped;
                 if (!cursor.done()) {
@@ -72,12 +78,43 @@ final class QueuedBuild {
                 } else {
                     skipped++;
                 }
-                budget--;
+                remaining--;
             } else if (operation instanceof FillOperation fill) {
                 cursor = new FillCursor(fill);
             }
         }
+        processed += budget - remaining;
+        maybeSendProgress();
         return false;
+    }
+
+    private void maybeSendProgress() {
+        if (estimatedBlocks < PROGRESS_MIN_BLOCKS) {
+            return;
+        }
+        long now = System.nanoTime();
+        if (now - lastProgressNanos < PROGRESS_INTERVAL_NANOS) {
+            return;
+        }
+        lastProgressNanos = now;
+        // Fills that skip entirely consume less budget than their volume, so the
+        // estimate can only overshoot; cap at 99% until the completion message.
+        long percent = Math.min(99, processed * 100 / estimatedBlocks);
+        notifyPlayer("Minedit: building... ~" + percent + "% (" + placed + " blocks placed so far).");
+    }
+
+    private static long estimateBlocks(List<BuildOperation> operations) {
+        long total = 0;
+        for (BuildOperation operation : operations) {
+            if (operation instanceof FillOperation fill) {
+                total += (long) (Math.abs(fill.x1() - fill.x2()) + 1)
+                        * (Math.abs(fill.y1() - fill.y2()) + 1)
+                        * (Math.abs(fill.z1() - fill.z2()) + 1);
+            } else {
+                total++;
+            }
+        }
+        return total;
     }
 
     private boolean placeSet(SetBlockOperation operation) {

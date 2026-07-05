@@ -15,10 +15,12 @@ import com.angel.aibuilder.selection.BuildSelection;
 import com.angel.aibuilder.selection.SelectionManager;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -31,7 +33,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 
 public class AiBuilderCommands {
     private static final String EFFORT_LIST = "none, minimal, low, medium, high, xhigh, max";
@@ -50,6 +51,9 @@ public class AiBuilderCommands {
                             try {
                                 AiBuilderSettings.setApiKey(StringArgumentType.getString(ctx, "key"));
                                 ctx.getSource().sendSuccess(() -> Component.literal("OpenRouter API key saved.").withStyle(ChatFormatting.GREEN), false);
+                                if (AiBuilderSettings.apiKeyFromEnvironment()) {
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Note: the OPENROUTER_API_KEY environment variable is set and takes precedence over the saved key.").withStyle(ChatFormatting.YELLOW), false);
+                                }
                             } catch (IOException e) {
                                 ctx.getSource().sendFailure(Component.literal("Could not save API key: " + e.getMessage()));
                             }
@@ -121,7 +125,7 @@ public class AiBuilderCommands {
                             String url = AiBuilderSettings.codexUrl();
                             String model = AiBuilderSettings.model();
                             source.sendSuccess(() -> Component.literal("Minedit: checking Codex bridge at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
-                            background(() -> {
+                            AiExecutors.supply(() -> {
                                 try {
                                     return CODEX_CLIENT.status(url, model);
                                 } catch (Exception e) {
@@ -208,12 +212,10 @@ public class AiBuilderCommands {
         // Registering a root literal vanilla already owns (like /stop on dedicated servers)
         // merges Brigadier nodes and hijacks the vanilla command. /minedit stop always works.
         if (event.getDispatcher().getRoot().getChild("stop") == null) {
-            event.getDispatcher().register(Commands.literal("stop")
-                    .executes(ctx -> stopJobs(ctx.getSource())));
+            event.getDispatcher().register(stopCommand());
         }
         event.getDispatcher().register(Commands.literal("minedit")
-                .then(Commands.literal("stop")
-                        .executes(ctx -> stopJobs(ctx.getSource()))));
+                .then(stopCommand()));
 
         event.getDispatcher().register(Commands.literal("status")
                 .executes(ctx -> {
@@ -234,7 +236,7 @@ public class AiBuilderCommands {
 
                             String generationId = StringArgumentType.getString(ctx, "generation_id");
                             source.sendSuccess(() -> Component.literal("Minedit: checking OpenRouter usage for " + generationId + "...").withStyle(ChatFormatting.YELLOW), false);
-                            background(() -> {
+                            AiExecutors.supply(() -> {
                                 try {
                                     return OPENROUTER_CLIENT.fetchUsageReport(apiKey, generationId);
                                 } catch (Exception e) {
@@ -465,7 +467,6 @@ public class AiBuilderCommands {
                 .then(Commands.literal("build")
                         .executes(ctx -> {
                             ServerPlayer player = ctx.getSource().getPlayerOrException();
-                            BuildQueue.cancelBuilds(player.getUUID());
                             if (BuildUndoManager.resetLastBuild(player)) {
                                 ctx.getSource().sendSuccess(() -> Component.literal("Minedit: restoring previous build area...").withStyle(ChatFormatting.YELLOW), false);
                             } else {
@@ -529,14 +530,35 @@ public class AiBuilderCommands {
                                                                         })))))))));
     }
 
-    private static int stopJobs(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        ServerPlayer player = source.getPlayerOrException();
-        int generationCount = BuildJobService.cancelGenerations(player.getUUID());
-        int queuedCount = BuildQueue.cancelBuilds(player.getUUID());
+    private static LiteralArgumentBuilder<CommandSourceStack> stopCommand() {
+        return Commands.literal("stop")
+                .executes(ctx -> stopOwnJobs(ctx.getSource()))
+                .then(Commands.argument("player", EntityArgument.player())
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(ctx -> stopJobsFor(ctx.getSource(), EntityArgument.getPlayer(ctx, "player"))));
+    }
+
+    private static int stopOwnJobs(CommandSourceStack source) {
+        ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendFailure(Component.literal("Minedit: from the console, use /minedit stop <player>."));
+            return 0;
+        }
+        return stopJobsFor(source, player);
+    }
+
+    private static int stopJobsFor(CommandSourceStack source, ServerPlayer target) {
+        int generationCount = BuildJobService.cancelGenerations(target.getUUID());
+        int queuedCount = BuildQueue.cancelBuilds(target.getUUID());
+        boolean self = source.getPlayer() == target;
+        String who = self ? "" : " for " + target.getName().getString();
         if (generationCount == 0 && queuedCount == 0) {
-            source.sendSuccess(() -> Component.literal("Minedit: nothing active to stop.").withStyle(ChatFormatting.YELLOW), false);
+            source.sendSuccess(() -> Component.literal("Minedit: nothing active to stop" + who + ".").withStyle(ChatFormatting.YELLOW), false);
         } else {
-            source.sendSuccess(() -> Component.literal("Minedit: stop requested. Canceled " + generationCount + " active generation(s) and removed " + queuedCount + " queued placement job(s).").withStyle(ChatFormatting.YELLOW), false);
+            source.sendSuccess(() -> Component.literal("Minedit: stop requested" + who + ". Canceled " + generationCount + " active generation(s) and removed " + queuedCount + " queued placement job(s).").withStyle(ChatFormatting.YELLOW), false);
+            if (!self) {
+                target.sendSystemMessage(Component.literal("Minedit: an operator stopped your active generations and queued placements.").withStyle(ChatFormatting.YELLOW));
+            }
         }
         return 1;
     }
@@ -611,7 +633,7 @@ public class AiBuilderCommands {
         String apiKey = AiBuilderSettings.apiKey();
         String model = AiBuilderSettings.model();
         source.sendSuccess(() -> Component.literal("Minedit: checking OpenRouter providers for " + model + "...").withStyle(ChatFormatting.YELLOW), false);
-        background(() -> {
+        AiExecutors.supply(() -> {
             try {
                 return OPENROUTER_CLIENT.listProvidersForModel(apiKey, model);
             } catch (Exception e) {
@@ -712,7 +734,7 @@ public class AiBuilderCommands {
         MinecraftServer server = source.getServer();
         String url = AiBuilderSettings.codexUrl();
         source.sendSuccess(() -> Component.literal("Minedit: checking Cursor models through local bridge at " + url + "...").withStyle(ChatFormatting.YELLOW), false);
-        background(() -> {
+        AiExecutors.supply(() -> {
             try {
                 return CURSOR_CLIENT.listModels(url);
             } catch (Exception e) {
@@ -770,7 +792,9 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("OpenRouter inference provider: " + (openRouterProvider.isBlank() ? "automatic" : openRouterProvider + " (no fallback)")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Max completion tokens: " + (maxCompletionTokens > 0 ? maxCompletionTokens : "provider/model default")).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("OpenRouter streaming: " + (streaming ? "enabled" : "disabled")).withStyle(ChatFormatting.GRAY), false);
-        source.sendSuccess(() -> Component.literal("OpenRouter key: " + (hasOpenRouterKey ? "saved" : "not set")).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
+        String keyLabel = AiBuilderSettings.apiKeyFromEnvironment() ? "from OPENROUTER_API_KEY environment variable"
+                : hasOpenRouterKey ? "saved" : "not set";
+        source.sendSuccess(() -> Component.literal("OpenRouter key: " + keyLabel).withStyle(hasOpenRouterKey ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
         source.sendSuccess(() -> Component.literal("Local bridge URL: " + codexUrl).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("AI generations in progress: " + BuildJobService.activeGenerationCount()).withStyle(ChatFormatting.GRAY), false);
         source.sendSuccess(() -> Component.literal("Queued block placement jobs: " + BuildQueue.size()).withStyle(ChatFormatting.GRAY), false);
@@ -783,6 +807,7 @@ public class AiBuilderCommands {
 
             source.sendSuccess(() -> Component.literal("Your AI generation: " + (BuildJobService.hasActiveGenerationFor(player.getUUID()) ? "yes" : "no")).withStyle(ChatFormatting.GRAY), false);
             source.sendSuccess(() -> Component.literal("Your queued block placement: " + (BuildQueue.hasBuildFor(player.getUUID()) ? "yes" : "no")).withStyle(ChatFormatting.GRAY), false);
+            source.sendSuccess(() -> Component.literal("Your undo snapshots (/reset build): " + BuildUndoManager.undoDepth(player.getUUID())).withStyle(ChatFormatting.GRAY), false);
         }
     }
 
@@ -800,10 +825,6 @@ public class AiBuilderCommands {
         } else {
             source.sendFailure(Component.literal("Current model `" + currentModel + "` was not found in Codex. Try /model gpt-5.5."));
         }
-    }
-
-    private static <T> CompletableFuture<T> background(java.util.function.Supplier<T> task) {
-        return CompletableFuture.supplyAsync(task, AiExecutors.BACKGROUND);
     }
 
     private static String rootMessage(Throwable throwable) {

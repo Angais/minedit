@@ -27,7 +27,6 @@ import java.util.UUID;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -148,7 +147,7 @@ public final class BuildJobService {
     public static void importBuild(ServerPlayer player, BuildSelection selection, String responseOrCode) {
         MinecraftServer server = player.level().getServer();
         UUID playerId = player.getUUID();
-        background(() -> {
+        AiExecutors.supply(() -> {
             String code = null;
             try {
                 code = ResponseParser.extractCode(responseOrCode);
@@ -185,7 +184,7 @@ public final class BuildJobService {
         player.sendSystemMessage(Component.literal("Minedit stages: starting " + BUILD_STAGES.size() + " focused build stages with " + options.targetDescription() + ".").withStyle(ChatFormatting.YELLOW));
 
         ActiveGeneration generation = beginGeneration(playerId);
-        background(() -> {
+        AiExecutors.supply(() -> {
             generation.token().attachCurrentThread();
             StringBuilder debugPrompts = new StringBuilder();
             StringBuilder debugResponses = new StringBuilder();
@@ -288,7 +287,7 @@ public final class BuildJobService {
         MinecraftServer server = player.level().getServer();
         UUID playerId = player.getUUID();
         ActiveGeneration generation = beginGeneration(playerId);
-        background(() -> {
+        AiExecutors.supply(() -> {
             generation.token().attachCurrentThread();
             String prompt = null;
             AiCompletion completion = null;
@@ -353,7 +352,7 @@ public final class BuildJobService {
         player.sendSystemMessage(Component.literal("Minedit tool agent: waiting for Codex to place the first batch before clearing the footprint.").withStyle(ChatFormatting.YELLOW));
 
         ActiveGeneration generation = beginGeneration(playerId);
-        background(() -> {
+        AiExecutors.supply(() -> {
             generation.token().attachCurrentThread();
             String prompt = null;
             AiCompletion completion = null;
@@ -447,7 +446,7 @@ public final class BuildJobService {
         MinecraftServer server = player.level().getServer();
         UUID playerId = player.getUUID();
         ActiveGeneration generation = beginGeneration(playerId);
-        background(() -> {
+        AiExecutors.supply(() -> {
             generation.token().attachCurrentThread();
             String prompt = null;
             AiCompletion completion = null;
@@ -533,10 +532,6 @@ public final class BuildJobService {
         });
     }
 
-    private static <T> CompletableFuture<T> background(java.util.function.Supplier<T> task) {
-        return CompletableFuture.supplyAsync(task, AiExecutors.BACKGROUND);
-    }
-
     private static void sendProgress(MinecraftServer server, UUID playerId, String message) {
         sendMessage(server, playerId, message, ChatFormatting.LIGHT_PURPLE);
     }
@@ -554,7 +549,7 @@ public final class BuildJobService {
         if (options.provider() != AiProvider.OPENROUTER || options.openRouterApiKey().isBlank()) {
             return;
         }
-        background(() -> {
+        AiExecutors.supply(() -> {
             try {
                 return OPENROUTER_CLIENT.waitForCostSummary(options.openRouterApiKey(), generationId, Duration.ofSeconds(90)).orElse("");
             } catch (InterruptedException e) {
