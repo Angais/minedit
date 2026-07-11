@@ -19,10 +19,11 @@ public class SelectionParticleRenderer {
             return;
         }
 
-        SelectionManager.clientSelection(minecraft.player.getUUID()).ifPresent(selection -> draw(selection, minecraft.level));
+        SelectionManager.clientState(minecraft.player.getUUID()).ifPresent(state -> draw(state, minecraft.level));
     }
 
-    private void draw(BuildSelection selection, ClientLevel level) {
+    private void draw(SelectionManager.SelectionState state, ClientLevel level) {
+        BuildSelection selection = state.selection();
         int minX = selection.minX();
         int maxX = selection.maxX();
         int minZ = selection.minZ();
@@ -42,6 +43,7 @@ public class SelectionParticleRenderer {
         cornerPost(level, new BlockPos(maxX, selection.baseY(), minZ));
         cornerPost(level, new BlockPos(minX, selection.baseY(), maxZ));
         cornerPost(level, new BlockPos(maxX, selection.baseY(), maxZ));
+        orientationPost(level, selection, state.quarterTurns());
     }
 
     private void cornerPost(ClientLevel level, BlockPos pos) {
@@ -52,5 +54,21 @@ public class SelectionParticleRenderer {
 
     private void particle(ClientLevel level, double x, double y, double z) {
         level.addParticle(ParticleTypes.END_ROD, true, false, x, y, z, 0.0, 0.0, 0.0);
+    }
+
+    private void orientationPost(ClientLevel level, BuildSelection selection, int quarterTurns) {
+        int x = switch (quarterTurns) {
+            case 1, 2 -> selection.maxX();
+            default -> selection.minX();
+        };
+        int z = switch (quarterTurns) {
+            case 2, 3 -> selection.maxZ();
+            default -> selection.minZ();
+        };
+        for (int i = 1; i <= 3; i++) {
+            level.addParticle(ParticleTypes.SOUL_FIRE_FLAME, true, false,
+                    x + 0.5, selection.baseY() + i, z + 0.5,
+                    0.0, 0.0, 0.0);
+        }
     }
 }

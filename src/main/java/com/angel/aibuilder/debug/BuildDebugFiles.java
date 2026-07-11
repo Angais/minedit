@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 
 public final class BuildDebugFiles {
     private static final Path DIR = FMLPaths.CONFIGDIR.get().resolve("minedit-debug");
@@ -26,11 +27,13 @@ public final class BuildDebugFiles {
         }
     }
 
-    public static Path writeExportPrompt(String prompt) throws IOException {
+    public static Path writeExportPrompt(String prompt, ExportedBuildSize size) throws IOException {
         Files.createDirectories(DIR);
         Files.writeString(EXPORT_PROMPT, prompt == null ? "" : prompt, StandardCharsets.UTF_8);
-        if (!Files.exists(IMPORT_BUILD)) {
-            Files.writeString(IMPORT_BUILD, "", StandardCharsets.UTF_8);
+        if (!Files.exists(IMPORT_BUILD) || Files.readString(IMPORT_BUILD, StandardCharsets.UTF_8).isBlank()) {
+            String template = size.metadataLine() + "\n"
+                    + "// Paste the model response below this line. Keep the footprint line so /selection import can recover its size.\n\n";
+            Files.writeString(IMPORT_BUILD, template, StandardCharsets.UTF_8);
         }
         return EXPORT_PROMPT;
     }
@@ -39,7 +42,25 @@ public final class BuildDebugFiles {
         return IMPORT_BUILD;
     }
 
+    public static Path exportPromptPath() {
+        return EXPORT_PROMPT;
+    }
+
     public static String readImportBuild() throws IOException {
         return Files.readString(IMPORT_BUILD, StandardCharsets.UTF_8);
+    }
+
+    public static Optional<ExportedBuildSize> readImportedBuildSize() throws IOException {
+        if (!Files.exists(IMPORT_BUILD)) {
+            return Optional.empty();
+        }
+        return ExportedBuildSize.parseImport(Files.readString(IMPORT_BUILD, StandardCharsets.UTF_8));
+    }
+
+    public static Optional<ExportedBuildSize> readExportedBuildSize() throws IOException {
+        if (!Files.exists(EXPORT_PROMPT)) {
+            return Optional.empty();
+        }
+        return ExportedBuildSize.parse(Files.readString(EXPORT_PROMPT, StandardCharsets.UTF_8));
     }
 }

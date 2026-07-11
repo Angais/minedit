@@ -202,6 +202,10 @@ Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor 
 /maxcompletiontokens <tokens>
 /build export <prompt>
 /build import
+/selection import
+/selection move here
+/selection move <forward|back|left|right|up|down> [blocks]
+/selection rotate [clockwise|counterclockwise]
 /effort none
 /effort minimal
 /effort low
@@ -258,9 +262,36 @@ To use a model outside Minedit without making an in-game API call:
 /build export <prompt>
 ```
 
-This writes the exact build prompt to `config/minedit-debug/export-prompt.txt` and creates `config/minedit-debug/import-build.js` if needed. Send the exported prompt to a model yourself, then paste either the full model response or just the returned `function build(api) { ... }` code into `import-build.js`.
+This writes the manual-build prompt to `config/minedit-debug/export-prompt.txt` and creates `config/minedit-debug/import-build.js` if needed. The import file starts with a footprint marker such as:
 
-Then select the same footprint in Minecraft and run:
+```javascript
+// minedit-footprint: width=45 depth=54
+```
+
+Send the exported prompt to a model yourself, then paste the response below that marker. The prompt also tells the model to repeat the marker in its response, so the size remains attached to the imported code even if you replace the whole file.
+
+To recover the exact footprint size—even after restarting the game—stand where you want its center and run:
+
+```mcfunction
+/selection import
+```
+
+This reads width and depth from `import-build.js` first, so deleting or replacing `export-prompt.txt` does not affect that import. For older import files without metadata, Minedit can also recognize hard-coded `w`/`d` values and otherwise falls back to the last compatible export prompt. Parameterized legacy code using `api.getWidth()`/`getDepth()` cannot reveal a deleted historical size, so add the marker manually if neither file still records it.
+
+The recovered footprint is centered on the block under you. Before placing anything, you can reposition and rotate the preview:
+
+```mcfunction
+/selection move here
+/selection move forward 5
+/selection move left 2
+/selection move up 1
+/selection rotate
+/selection rotate counterclockwise
+```
+
+`forward`, `back`, `left`, and `right` follow the direction you are currently facing. Cardinal directions (`north`, `south`, `east`, and `west`) also work. `/selection move here` recenters the footprint beneath your current position. Rotation stays centered and turns the imported geometry as well as directional block states such as stairs, doors, rails, signs, and side connections. The blue-flame corner in the selection preview marks the import's local `(0,0)`, so square footprints still show their orientation.
+
+When the preview is where you want it, run:
 
 ```mcfunction
 /build import
@@ -303,6 +334,31 @@ Clear the current selection:
 ```
 
 ## Selection Commands
+
+Recover the imported build's recorded footprint at your current position:
+
+```mcfunction
+/selection import
+```
+
+Move the selection to your current position or nudge it relative to where you are facing:
+
+```mcfunction
+/selection move here
+/selection move forward [blocks]
+/selection move back [blocks]
+/selection move left [blocks]
+/selection move right [blocks]
+/selection move up [blocks]
+/selection move down [blocks]
+```
+
+Rotate the selection and a subsequent imported build around its center:
+
+```mcfunction
+/selection rotate
+/selection rotate counterclockwise
+```
 
 Teleport to the active selection:
 

@@ -10,6 +10,7 @@ import com.angel.aibuilder.codex.CodexLocalClient;
 import com.angel.aibuilder.config.AiBuilderSettings;
 import com.angel.aibuilder.cursor.CursorLocalClient;
 import com.angel.aibuilder.debug.BuildDebugFiles;
+import com.angel.aibuilder.debug.ExportedBuildSize;
 import com.angel.aibuilder.openrouter.OpenRouterClient;
 import com.angel.aibuilder.selection.BuildSelection;
 import com.angel.aibuilder.selection.SelectionManager;
@@ -275,7 +276,7 @@ public class AiBuilderCommands {
                                     try {
                                         Path path = BuildJobService.exportBuildPrompt(selection, prompt);
                                         Path importPath = BuildDebugFiles.importBuildPath();
-                                        ctx.getSource().sendSuccess(() -> Component.literal("Minedit export written to " + path + ". Paste the model response or build(api) code into " + importPath + ", then run /build import.").withStyle(ChatFormatting.GREEN), false);
+                                        ctx.getSource().sendSuccess(() -> Component.literal("Minedit export written to " + path + ". Paste the model response or build(api) code into " + importPath + ". If you lose the selection, run /selection import; then run /build import.").withStyle(ChatFormatting.GREEN), false);
                                     } catch (IOException e) {
                                         ctx.getSource().sendFailure(Component.literal("Could not export Minedit prompt: " + e.getMessage()));
                                         return 0;
@@ -305,7 +306,10 @@ public class AiBuilderCommands {
                             }
 
                             ctx.getSource().sendSuccess(() -> Component.literal("Minedit import: reading " + importPath + "...").withStyle(ChatFormatting.YELLOW), false);
-                            BuildJobService.importBuild(player, selection, responseOrCode);
+                            int quarterTurns = SelectionManager.state(player.getUUID())
+                                    .map(SelectionManager.SelectionState::quarterTurns)
+                                    .orElse(0);
+                            BuildJobService.importBuild(player, selection, quarterTurns, responseOrCode);
                             return 1;
                         })
                         .then(Commands.argument("code", StringArgumentType.greedyString())
@@ -319,7 +323,10 @@ public class AiBuilderCommands {
 
                                     String responseOrCode = StringArgumentType.getString(ctx, "code");
                                     ctx.getSource().sendSuccess(() -> Component.literal("Minedit import: parsing pasted code...").withStyle(ChatFormatting.YELLOW), false);
-                                    BuildJobService.importBuild(player, selection, responseOrCode);
+                                    int quarterTurns = SelectionManager.state(player.getUUID())
+                                            .map(SelectionManager.SelectionState::quarterTurns)
+                                            .orElse(0);
+                                    BuildJobService.importBuild(player, selection, quarterTurns, responseOrCode);
                                     return 1;
                                 })))
                 .then(Commands.literal("agent")
@@ -490,6 +497,32 @@ public class AiBuilderCommands {
                         })));
 
         event.getDispatcher().register(Commands.literal("selection")
+                .then(Commands.literal("import")
+                        .executes(ctx -> selectImportFootprint(ctx.getSource())))
+                .then(Commands.literal("move")
+                        .then(Commands.literal("here")
+                                .executes(ctx -> moveSelectionHere(ctx.getSource())))
+                        .then(selectionMoveCommand("forward"))
+                        .then(selectionMoveCommand("back"))
+                        .then(selectionMoveCommand("backward"))
+                        .then(selectionMoveCommand("left"))
+                        .then(selectionMoveCommand("right"))
+                        .then(selectionMoveCommand("up"))
+                        .then(selectionMoveCommand("down"))
+                        .then(selectionMoveCommand("north"))
+                        .then(selectionMoveCommand("south"))
+                        .then(selectionMoveCommand("east"))
+                        .then(selectionMoveCommand("west")))
+                .then(Commands.literal("rotate")
+                        .executes(ctx -> rotateSelection(ctx.getSource(), 1))
+                        .then(Commands.literal("clockwise")
+                                .executes(ctx -> rotateSelection(ctx.getSource(), 1)))
+                        .then(Commands.literal("cw")
+                                .executes(ctx -> rotateSelection(ctx.getSource(), 1)))
+                        .then(Commands.literal("counterclockwise")
+                                .executes(ctx -> rotateSelection(ctx.getSource(), -1)))
+                        .then(Commands.literal("ccw")
+                                .executes(ctx -> rotateSelection(ctx.getSource(), -1))))
                 .then(Commands.literal("tp")
                         .executes(ctx -> teleportToSelection(ctx.getSource())))
                 .then(Commands.literal("teleport")
@@ -502,9 +535,10 @@ public class AiBuilderCommands {
                                 ctx.getSource().sendFailure(Component.literal("Minedit: no previous selection to restore."));
                                 return 0;
                             }
-                            SelectionManager.setClient(player.getUUID(), selection);
-                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit: restored selection " + selection.shortSummary()
-                                    + ". Reuse: " + selection.reuseCommand()).withStyle(ChatFormatting.GREEN), false);
+                            SelectionManager.SelectionState restored = SelectionManager.state(player.getUUID()).orElseThrow();
+                            SelectionManager.setClient(player.getUUID(), restored);
+                            ctx.getSource().sendSuccess(() -> Component.literal("Minedit: restored selection " + selectionPlacementSummary(restored)
+                                    + ". Reuse area: " + selection.reuseCommand()).withStyle(ChatFormatting.GREEN), false);
                             return 1;
                         }))
                 .then(Commands.literal("set")
@@ -534,6 +568,192 @@ public class AiBuilderCommands {
                                                                                     + ". Reuse: " + selection.reuseCommand()).withStyle(ChatFormatting.GREEN), false);
                                                                             return 1;
                                                                         })))))))));
+    }
+
+    private static int selectImportFootprint(CommandSourceStack source) {
+        ServerPlayer player;
+        try {
+            player = source.getPlayerOrException();
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("Minedit: /selection import must be run by a player."));
+            return 0;
+        }
+
+        ExportedBuildSize size;
+        boolean fromImport;
+        try {
+            size = BuildDebugFiles.readImportedBuildSize().orElse(null);
+            fromImport = size != null;
+            if (size == null) {
+                size = BuildDebugFiles.readExportedBuildSize().orElse(null);
+            }
+        } catch (IOException e) {
+            source.sendFailure(Component.literal("Could not read Minedit import/export files: " + e.getMessage()));
+            return 0;
+        }
+        if (size == null) {
+            source.sendFailure(Component.literal("Minedit: no footprint metadata was found in " + BuildDebugFiles.importBuildPath()
+                    + " and no usable export prompt exists. Older parameterized imports using api.getWidth()/getDepth() do not contain their original size; add `// minedit-footprint: width=<width> depth=<depth>` to the import."));
+            return 0;
+        }
+        ExportedBuildSize selectedSize = size;
+        boolean selectedFromImport = fromImport;
+
+        BlockPos anchor = player.blockPosition().below();
+        BuildSelection selection;
+        try {
+            selection = BuildSelection.centeredAt(anchor, selectedSize.width(), selectedSize.depth());
+        } catch (ArithmeticException e) {
+            source.sendFailure(Component.literal("Minedit: the exported footprint is too large to place at your current coordinates."));
+            return 0;
+        }
+        SelectionManager.SelectionState state = new SelectionManager.SelectionState(selection, 0, anchor.getX(), anchor.getZ());
+        setSelectionState(player, state);
+        String sizeSource = selectedFromImport ? "the import file" : "the export prompt (the import has no size metadata)";
+        source.sendSuccess(() -> Component.literal("Minedit: loaded the " + selectedSize.width() + " x " + selectedSize.depth() + " footprint from " + sizeSource
+                + ", centered under you at base Y " + selection.baseY() + ". The blue-flame corner marks the import's local (0,0). Use /selection move here or /selection move <forward|back|left|right|up|down> [blocks], /selection rotate, then /build import.")
+                .withStyle(ChatFormatting.GREEN), false);
+        return 1;
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> selectionMoveCommand(String direction) {
+        return Commands.literal(direction)
+                .executes(ctx -> moveSelection(ctx.getSource(), direction, 1))
+                .then(Commands.argument("blocks", IntegerArgumentType.integer(1))
+                        .executes(ctx -> moveSelection(ctx.getSource(), direction, IntegerArgumentType.getInteger(ctx, "blocks"))));
+    }
+
+    private static int moveSelection(CommandSourceStack source, String direction, int blocks) {
+        ServerPlayer player;
+        try {
+            player = source.getPlayerOrException();
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("Minedit: /selection move must be run by a player."));
+            return 0;
+        }
+
+        SelectionManager.SelectionState current = SelectionManager.state(player.getUUID()).orElse(null);
+        if (current == null) {
+            source.sendFailure(Component.literal("Minedit: no active selection to move. Use /selection import or select two corners first."));
+            return 0;
+        }
+
+        int facingX = player.getDirection().getStepX();
+        int facingZ = player.getDirection().getStepZ();
+        int x;
+        int y = 0;
+        int z;
+        switch (direction) {
+            case "forward" -> {
+                x = facingX;
+                z = facingZ;
+            }
+            case "back", "backward" -> {
+                x = -facingX;
+                z = -facingZ;
+            }
+            case "left" -> {
+                x = facingZ;
+                z = -facingX;
+            }
+            case "right" -> {
+                x = -facingZ;
+                z = facingX;
+            }
+            case "up" -> {
+                x = 0;
+                y = 1;
+                z = 0;
+            }
+            case "down" -> {
+                x = 0;
+                y = -1;
+                z = 0;
+            }
+            case "north" -> {
+                x = 0;
+                z = -1;
+            }
+            case "south" -> {
+                x = 0;
+                z = 1;
+            }
+            case "east" -> {
+                x = 1;
+                z = 0;
+            }
+            case "west" -> {
+                x = -1;
+                z = 0;
+            }
+            default -> {
+                source.sendFailure(Component.literal("Minedit: unknown selection movement direction."));
+                return 0;
+            }
+        }
+
+        SelectionManager.SelectionState moved = current.moved(x * blocks, y * blocks, z * blocks);
+        setSelectionState(player, moved);
+        source.sendSuccess(() -> Component.literal("Minedit: moved selection " + direction + " " + blocks + " block(s): "
+                + selectionPlacementSummary(moved) + ".").withStyle(ChatFormatting.GREEN), false);
+        return 1;
+    }
+
+    private static int moveSelectionHere(CommandSourceStack source) {
+        ServerPlayer player;
+        try {
+            player = source.getPlayerOrException();
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("Minedit: /selection move here must be run by a player."));
+            return 0;
+        }
+
+        SelectionManager.SelectionState current = SelectionManager.state(player.getUUID()).orElse(null);
+        if (current == null) {
+            source.sendFailure(Component.literal("Minedit: no active selection to move. Use /selection import or select two corners first."));
+            return 0;
+        }
+
+        BlockPos anchor = player.blockPosition().below();
+        BuildSelection selection = BuildSelection.centeredAt(anchor, current.selection().width(), current.selection().depth());
+        SelectionManager.SelectionState moved = new SelectionManager.SelectionState(selection, current.quarterTurns(), anchor.getX(), anchor.getZ());
+        setSelectionState(player, moved);
+        source.sendSuccess(() -> Component.literal("Minedit: centered the selection under you: " + selectionPlacementSummary(moved) + ".")
+                .withStyle(ChatFormatting.GREEN), false);
+        return 1;
+    }
+
+    private static int rotateSelection(CommandSourceStack source, int turns) {
+        ServerPlayer player;
+        try {
+            player = source.getPlayerOrException();
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("Minedit: /selection rotate must be run by a player."));
+            return 0;
+        }
+
+        SelectionManager.SelectionState current = SelectionManager.state(player.getUUID()).orElse(null);
+        if (current == null) {
+            source.sendFailure(Component.literal("Minedit: no active selection to rotate. Use /selection import or select two corners first."));
+            return 0;
+        }
+
+        SelectionManager.SelectionState rotated = current.rotated(turns);
+        setSelectionState(player, rotated);
+        String direction = turns > 0 ? "clockwise" : "counterclockwise";
+        source.sendSuccess(() -> Component.literal("Minedit: rotated selection 90 degrees " + direction + " around its center: "
+                + selectionPlacementSummary(rotated) + ". /build import will rotate the blocks and their directional states to match.")
+                .withStyle(ChatFormatting.GREEN), false);
+        return 1;
+    }
+
+    private static void setSelectionState(ServerPlayer player, SelectionManager.SelectionState state) {
+        SelectionManager.setServer(player.getUUID(), state);
+        SelectionManager.setClient(player.getUUID(), state);
+    }
+
+    private static String selectionPlacementSummary(SelectionManager.SelectionState state) {
+        return state.selection().shortSummary() + "; import rotation " + (state.quarterTurns() * 90) + " degrees clockwise";
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> stopCommand() {
@@ -854,8 +1074,8 @@ public class AiBuilderCommands {
         source.sendSuccess(() -> Component.literal("Queued block placement jobs: " + BuildQueue.size()).withStyle(ChatFormatting.GRAY), false);
 
         if (source.getEntity() instanceof ServerPlayer player) {
-            SelectionManager.selection(player.getUUID()).ifPresentOrElse(selection -> {
-                String text = "Selection: " + selection.shortSummary() + ". Reuse: " + selection.reuseCommand();
+            SelectionManager.state(player.getUUID()).ifPresentOrElse(state -> {
+                String text = "Selection: " + selectionPlacementSummary(state) + ". Reuse area: " + state.selection().reuseCommand();
                 source.sendSuccess(() -> Component.literal(text).withStyle(ChatFormatting.GREEN), false);
             }, () -> source.sendSuccess(() -> Component.literal("Selection: none").withStyle(ChatFormatting.YELLOW), false));
 

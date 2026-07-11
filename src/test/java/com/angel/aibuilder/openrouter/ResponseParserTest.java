@@ -48,4 +48,25 @@ class ResponseParserTest {
         String response = "```\nfunction build(api) { api.fill(0,0,0,1,1,1,'stone'); }\n```";
         assertEquals("function build(api) { api.fill(0,0,0,1,1,1,'stone'); }", ResponseParser.extractCode(response));
     }
+
+    @Test
+    void stripsAccidentalFenceLinesInsideBareBuildFunction() {
+        String response = """
+                function build(api) {
+                  var w = api.getWidth();
+                  ```
+                  for (var x = 0; x < w; x++) {
+                    api.set(x, 0, 0, 'stone');
+                  }
+                  ```
+                }
+                """;
+        assertEquals("""
+                function build(api) {
+                  var w = api.getWidth();
+                  for (var x = 0; x < w; x++) {
+                    api.set(x, 0, 0, 'stone');
+                  }
+                }""", ResponseParser.extractCode(response));
+    }
 }

@@ -3,6 +3,21 @@ package com.angel.aibuilder.selection;
 import net.minecraft.core.BlockPos;
 
 public record BuildSelection(BlockPos first, BlockPos second) {
+    public static BuildSelection centeredAt(BlockPos center, int width, int depth) {
+        if (width < 1 || depth < 1) {
+            throw new IllegalArgumentException("Selection dimensions must be positive.");
+        }
+
+        int minX = Math.subtractExact(center.getX(), (width - 1) / 2);
+        int minZ = Math.subtractExact(center.getZ(), (depth - 1) / 2);
+        int maxX = Math.addExact(minX, width - 1);
+        int maxZ = Math.addExact(minZ, depth - 1);
+        return new BuildSelection(
+                new BlockPos(minX, center.getY(), minZ),
+                new BlockPos(maxX, center.getY(), maxZ)
+        );
+    }
+
     public int minX() {
         return Math.min(first.getX(), second.getX());
     }
@@ -29,6 +44,10 @@ public record BuildSelection(BlockPos first, BlockPos second) {
 
     public int depth() {
         return maxZ() - minZ() + 1;
+    }
+
+    public BuildSelection moved(int x, int y, int z) {
+        return new BuildSelection(first.offset(x, y, z), second.offset(x, y, z));
     }
 
     public String coordinateArguments() {

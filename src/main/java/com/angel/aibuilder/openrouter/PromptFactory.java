@@ -52,6 +52,17 @@ public final class PromptFactory {
     }
 
     public static String create(BuildSelection selection, String userPrompt) {
+        return create(selection, userPrompt, "");
+    }
+
+    public static String manualExport(BuildSelection selection, String userPrompt) {
+        String metadataRule = "- Begin the response with exactly this JavaScript comment: // minedit-footprint: width="
+                + selection.width() + " depth=" + selection.depth() + "\n"
+                + "- Put the build(api) function immediately after that comment.";
+        return create(selection, userPrompt, metadataRule);
+    }
+
+    private static String create(BuildSelection selection, String userPrompt, String metadataRule) {
         return """
                 You are controlling a Minecraft builder API inside NeoForge Minecraft 26.1.2.
                 Generate Rhino-compatible JavaScript. Do not describe the build outside code.
@@ -76,6 +87,7 @@ public final class PromptFactory {
                 - Stay inside x/z bounds. y can grow upward.
                 %s
                 %s
+                %s
                 - Return only one JavaScript function named build.
                 - The function signature must be: function build(api) { ... }
                 - Use ES5 JavaScript only: var, function, for loops, arrays, plain objects.
@@ -95,7 +107,7 @@ public final class PromptFactory {
 
                 User request:
                 %s
-                """.formatted(selection.width(), selection.depth(), PHYSICS_AND_ORIENTATION_RULES, DETAILED_BUILD_RULES, userPrompt);
+                """.formatted(selection.width(), selection.depth(), PHYSICS_AND_ORIENTATION_RULES, DETAILED_BUILD_RULES, metadataRule, userPrompt);
     }
 
     public static String stagedBuild(BuildSelection selection, String userPrompt, int stageNumber, int stageCount, String stageName, String stageGoal, String stageRules, String previousStages) {

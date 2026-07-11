@@ -12,7 +12,8 @@ public final class ResponseParser {
         }
 
         int fence = trimmed.indexOf("```");
-        if (fence >= 0) {
+        int buildFunctionIndex = trimmed.indexOf("function build");
+        if (fence >= 0 && (buildFunctionIndex < 0 || fence < buildFunctionIndex)) {
             int lineEnd = trimmed.indexOf('\n', fence);
             int endFence = trimmed.indexOf("```", lineEnd + 1);
             if (lineEnd >= 0 && endFence > lineEnd) {

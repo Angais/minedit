@@ -9,6 +9,7 @@ import com.angel.aibuilder.ai.AiRequestOptions;
 import com.angel.aibuilder.codex.CodexLocalClient;
 import com.angel.aibuilder.cursor.CursorLocalClient;
 import com.angel.aibuilder.debug.BuildDebugFiles;
+import com.angel.aibuilder.debug.ExportedBuildSize;
 import com.angel.aibuilder.js.JsBuildRunner;
 import com.angel.aibuilder.openrouter.OpenRouterClient;
 import com.angel.aibuilder.openrouter.PromptFactory;
@@ -141,19 +142,25 @@ public final class BuildJobService {
     }
 
     public static Path exportBuildPrompt(BuildSelection selection, String userPrompt) throws IOException {
-        return BuildDebugFiles.writeExportPrompt(PromptFactory.create(selection, userPrompt));
+        ExportedBuildSize size = new ExportedBuildSize(selection.width(), selection.depth());
+        return BuildDebugFiles.writeExportPrompt(PromptFactory.manualExport(selection, userPrompt), size);
     }
 
-    public static void importBuild(ServerPlayer player, BuildSelection selection, String responseOrCode) {
+    public static void importBuild(ServerPlayer player, BuildSelection selection, int quarterTurns, String responseOrCode) {
         MinecraftServer server = player.level().getServer();
         UUID playerId = player.getUUID();
+        int turns = Math.floorMod(quarterTurns, 4);
+        int sourceWidth = turns % 2 == 0 ? selection.width() : selection.depth();
+        int sourceDepth = turns % 2 == 0 ? selection.depth() : selection.width();
         AiExecutors.supply(() -> {
             String code = null;
             try {
                 code = ResponseParser.extractCode(responseOrCode);
                 BuildDebugFiles.writeLast("", responseOrCode, code);
-                BuildPlan plan = JsBuildRunner.run(code, selection.width(), selection.depth());
-                return new Result(code, plan, "", "", null);
+                BuildPlan sourcePlan = JsBuildRunner.run(code, sourceWidth, sourceDepth);
+                BuildPlan rotatedPlan = new BuildPlan();
+                BuildRotation.rotate(sourcePlan.operations(), sourceWidth, sourceDepth, turns).forEach(rotatedPlan::add);
+                return new Result(code, rotatedPlan, "", "", null);
             } catch (Exception e) {
                 BuildDebugFiles.writeLast("", responseOrCode, code);
                 return new Result(null, null, "", "", e);
@@ -169,7 +176,8 @@ public final class BuildJobService {
                 return;
             }
             List<BuildOperation> operations = withInitialClear((ServerLevel) currentPlayer.level(), selection, result.plan.operations());
-            currentPlayer.sendSystemMessage(Component.literal("Minedit import: queued " + operations.size() + " operations. Build mode will clear existing blocks in the selected footprint first.").withStyle(ChatFormatting.GREEN));
+            String rotationSummary = turns == 0 ? "" : " Rotated " + (turns * 90) + " degrees clockwise.";
+            currentPlayer.sendSystemMessage(Component.literal("Minedit import: queued " + operations.size() + " operations." + rotationSummary + " Build mode will clear existing blocks in the selected footprint first.").withStyle(ChatFormatting.GREEN));
             BuildQueue.enqueue(new QueuedBuild(currentPlayer, selection, operations));
         }));
     }

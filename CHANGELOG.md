@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `/selection import` reads footprint metadata from `import-build.js` first, then falls back to hard-coded legacy dimensions or `export-prompt.txt`, and centers the recovered area beneath the player.
+- Manual exports now place a `// minedit-footprint: width=... depth=...` marker in empty import files and require the model to preserve it, keeping each import's size independent from later exports.
+- `/selection move here` and `/selection move <forward|back|left|right|up|down|north|south|east|west> [blocks]` make recovered footprints easy to position.
+- `/selection rotate [clockwise|counterclockwise]` rotates the footprint and the subsequent imported geometry, including directional block states. A blue-flame preview marker shows the import's local origin.
+
+### Fixed
+
+- Manual imports tolerate accidental Markdown fence lines embedded inside an otherwise valid `function build(api)` response.
+
 ## 1.11.1
 
 ### Added
