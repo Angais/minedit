@@ -52,17 +52,30 @@ public final class PromptFactory {
     }
 
     public static String create(BuildSelection selection, String userPrompt) {
-        return create(selection, userPrompt, "");
+        return create(selection, userPrompt, "", "");
+    }
+
+    public static String maxPotential(BuildSelection selection, String userPrompt) {
+        MaxPotentialTargets targets = MaxPotentialTargets.forFootprint(selection.width(), selection.depth());
+        return create(selection, userPrompt, targets.promptRules(), "");
     }
 
     public static String manualExport(BuildSelection selection, String userPrompt) {
-        String metadataRule = "- Begin the response with exactly this JavaScript comment: // minedit-footprint: width="
-                + selection.width() + " depth=" + selection.depth() + "\n"
-                + "- Put the build(api) function immediately after that comment.";
-        return create(selection, userPrompt, metadataRule);
+        return create(selection, userPrompt, "", exportMetadataRule(selection));
     }
 
-    private static String create(BuildSelection selection, String userPrompt, String metadataRule) {
+    public static String maxPotentialExport(BuildSelection selection, String userPrompt) {
+        MaxPotentialTargets targets = MaxPotentialTargets.forFootprint(selection.width(), selection.depth());
+        return create(selection, userPrompt, targets.promptRules(), exportMetadataRule(selection));
+    }
+
+    private static String exportMetadataRule(BuildSelection selection) {
+        return "- Begin the response with exactly this JavaScript comment: // minedit-footprint: width="
+                + selection.width() + " depth=" + selection.depth() + "\n"
+                + "- Put the build(api) function immediately after that comment.";
+    }
+
+    private static String create(BuildSelection selection, String userPrompt, String qualityContract, String metadataRule) {
         return """
                 You are controlling a Minecraft builder API inside NeoForge Minecraft 26.1.2.
                 Generate Rhino-compatible JavaScript. Do not describe the build outside code.
@@ -88,6 +101,7 @@ public final class PromptFactory {
                 %s
                 %s
                 %s
+                %s
                 - Return only one JavaScript function named build.
                 - The function signature must be: function build(api) { ... }
                 - Use ES5 JavaScript only: var, function, for loops, arrays, plain objects.
@@ -95,7 +109,7 @@ public final class PromptFactory {
                 - Do not use trailing commas.
                 - Return raw code only, no markdown, no prose.
 
-                Good output shape:
+                Minimal API syntax example only; this is not a sufficient build or a quality/scale example:
                 function build(api) {
                   var w = api.getWidth();
                   var d = api.getDepth();
@@ -107,7 +121,7 @@ public final class PromptFactory {
 
                 User request:
                 %s
-                """.formatted(selection.width(), selection.depth(), PHYSICS_AND_ORIENTATION_RULES, DETAILED_BUILD_RULES, metadataRule, userPrompt);
+                """.formatted(selection.width(), selection.depth(), PHYSICS_AND_ORIENTATION_RULES, DETAILED_BUILD_RULES, qualityContract, metadataRule, userPrompt);
     }
 
     public static String stagedBuild(BuildSelection selection, String userPrompt, int stageNumber, int stageCount, String stageName, String stageGoal, String stageRules, String previousStages) {

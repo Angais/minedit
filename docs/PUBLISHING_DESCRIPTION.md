@@ -9,6 +9,7 @@ Minedit can use OpenRouter directly, or it can connect to a local bridge for Cod
 ## Features
 
 - Build structures from natural-language prompts with `/build`.
+- Push models toward footprint-scaled, high-density builds with `/build max`.
 - Edit selected builds with `/edit`.
 - Use quick edits for small targeted changes, such as changing materials or removing details.
 - Generate larger builds in multiple stages with `/build stages`.
@@ -51,6 +52,14 @@ Create a complete build with one model request:
 ```mcfunction
 /build a cute house
 ```
+
+Generate a more ambitious build with footprint-derived scale, density, distribution, and quality requirements:
+
+```mcfunction
+/build max a grand fortified desert palace
+```
+
+Max Potential uses one model request and adds explicit safeguards against faking scale with isolated blocks or faking density with invisible filler.
 
 Generate a larger build in focused phases:
 
@@ -140,6 +149,8 @@ These limits reduce risk, but they do not make generated builds perfect or world
 
 ```mcfunction
 /build <prompt>
+/build max <prompt>
+/build max export <prompt>
 /build stages <prompt>
 /build agent <prompt>
 /edit <prompt>

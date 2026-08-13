@@ -262,6 +262,47 @@ public class AiBuilderCommands {
                         })));
 
         event.getDispatcher().register(Commands.literal("build")
+                .then(Commands.literal("max")
+                        .then(Commands.literal("export")
+                                .then(Commands.argument("prompt", StringArgumentType.greedyString())
+                                        .executes(ctx -> {
+                                            ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                            BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+                                            if (selection == null) {
+                                                ctx.getSource().sendFailure(Component.literal("Select two footprint corners first by right-clicking blocks with a stick."));
+                                                return 0;
+                                            }
+
+                                            String prompt = StringArgumentType.getString(ctx, "prompt");
+                                            try {
+                                                Path path = BuildJobService.exportMaxPotentialBuildPrompt(selection, prompt);
+                                                Path importPath = BuildDebugFiles.importBuildPath();
+                                                ctx.getSource().sendSuccess(() -> Component.literal("Minedit Max Potential export written to " + path + ". Paste the model response or build(api) code into " + importPath + ". If you lose the selection, run /selection import; then run /build import.").withStyle(ChatFormatting.GREEN), false);
+                                            } catch (IOException e) {
+                                                ctx.getSource().sendFailure(Component.literal("Could not export Minedit Max Potential prompt: " + e.getMessage()));
+                                                return 0;
+                                            }
+                                            return 1;
+                                        })))
+                        .then(Commands.argument("prompt", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                    AiRequestOptions options = requestOptions(ctx.getSource(), false);
+                                    if (options == null) {
+                                        return 0;
+                                    }
+
+                                    BuildSelection selection = SelectionManager.selection(player.getUUID()).orElse(null);
+                                    if (selection == null) {
+                                        ctx.getSource().sendFailure(Component.literal("Select two footprint corners first by right-clicking blocks with a stick."));
+                                        return 0;
+                                    }
+
+                                    String prompt = StringArgumentType.getString(ctx, "prompt");
+                                    ctx.getSource().sendSuccess(() -> Component.literal("Minedit Max Potential: asking " + options.targetDescription() + " (" + options.effort() + ") for a high-density build...").withStyle(ChatFormatting.YELLOW), false);
+                                    BuildJobService.maxPotentialBuild(player, selection, prompt, options);
+                                    return 1;
+                                })))
                 .then(Commands.literal("export")
                         .then(Commands.argument("prompt", StringArgumentType.greedyString())
                                 .executes(ctx -> {

@@ -141,9 +141,18 @@ public final class BuildJobService {
         startWithPrompt(player, selection, options, PromptFactory.create(selection, userPrompt), Map.of(), true);
     }
 
+    public static void maxPotentialBuild(ServerPlayer player, BuildSelection selection, String userPrompt, AiRequestOptions options) {
+        startWithPrompt(player, selection, options, PromptFactory.maxPotential(selection, userPrompt), Map.of(), true);
+    }
+
     public static Path exportBuildPrompt(BuildSelection selection, String userPrompt) throws IOException {
         ExportedBuildSize size = new ExportedBuildSize(selection.width(), selection.depth());
         return BuildDebugFiles.writeExportPrompt(PromptFactory.manualExport(selection, userPrompt), size);
+    }
+
+    public static Path exportMaxPotentialBuildPrompt(BuildSelection selection, String userPrompt) throws IOException {
+        ExportedBuildSize size = new ExportedBuildSize(selection.width(), selection.depth());
+        return BuildDebugFiles.writeExportPrompt(PromptFactory.maxPotentialExport(selection, userPrompt), size);
     }
 
     public static void importBuild(ServerPlayer player, BuildSelection selection, int quarterTurns, String responseOrCode) {

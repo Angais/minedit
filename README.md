@@ -74,6 +74,18 @@ One model call generates the whole build:
 
 Build mode clears existing non-air blocks in the selected footprint before placing the generated structure.
 
+### Max Potential Build
+
+Use an opt-in stronger prompt with footprint-derived scale, density, distribution, and quality targets:
+
+```mcfunction
+/build max a grand fortified desert palace
+```
+
+Max Potential treats its construction targets as requirements rather than upper limits. It explicitly forbids isolated distant blocks, oversized empty platforms, hidden filler, and buried layers used only to fake scale or block usage. Targets adapt to the selected footprint, while the prompt allows intentionally narrow subjects to use a coherent base, terrain, path, or supporting composition instead of distorting the main object.
+
+This mode currently strengthens the generation prompt; it does not automatically reject or retry a build based on measured geometry. It uses one model request, like a normal build.
+
 ### Staged Build
 
 Several focused model calls build the structure in phases:
@@ -201,6 +213,7 @@ Cursor uses `agent -p --mode=ask` for normal build/edit/staged requests. Cursor 
 /maxtokens default
 /maxcompletiontokens <tokens>
 /build export <prompt>
+/build max export <prompt>
 /build import
 /selection import
 /selection move here
@@ -260,6 +273,12 @@ To use a model outside Minedit without making an in-game API call:
 
 ```mcfunction
 /build export <prompt>
+```
+
+Export the stronger Max Potential prompt instead with:
+
+```mcfunction
+/build max export <prompt>
 ```
 
 This writes the manual-build prompt to `config/minedit-debug/export-prompt.txt` and creates `config/minedit-debug/import-build.js` if needed. The import file starts with a footprint marker such as:

@@ -4,6 +4,7 @@
 
 ### Added
 
+- `/build max <prompt>` adds an opt-in Max Potential prompt with footprint-derived scale, height, construction-density, distribution, and quality requirements, plus explicit safeguards against isolated bounding-box markers and invisible filler. `/build max export <prompt>` exports the same prompt contract for manual generation and import.
 - `/selection import` reads footprint metadata from `import-build.js` first, then falls back to hard-coded legacy dimensions or `export-prompt.txt`, and centers the recovered area beneath the player.
 - Manual exports now place a `// minedit-footprint: width=... depth=...` marker in empty import files and require the model to preserve it, keeping each import's size independent from later exports.
 - `/selection move here` and `/selection move <forward|back|left|right|up|down|north|south|east|west> [blocks]` make recovered footprints easy to position.
